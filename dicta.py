@@ -1962,34 +1962,40 @@ class DictaApp(ctk.CTk):
     def show_custom_confirm_dialog(self, title, icon, heading, message, confirm_text, cancel_text="キャンセル", kind="danger", on_confirm=None, on_cancel=None):
         dlg = ctk.CTkToplevel(self)
         dlg.title(title)
-        dlg.geometry("540x260")
-        dlg.resizable(False, False)
+        dlg_w, dlg_h = 650, 320
+        dlg.geometry(f"{dlg_w}x{dlg_h}")
+        dlg.minsize(580, 280)
         dlg.configure(fg_color="#0A1220")
         dlg.transient(self)
         dlg.grab_set()
 
         try:
             self.update_idletasks()
-            rx = self.winfo_x() + (self.winfo_width() - 540) // 2
-            ry = self.winfo_y() + (self.winfo_height() - 260) // 2
+            rx = self.winfo_x() + (self.winfo_width() - dlg_w) // 2
+            ry = self.winfo_y() + (self.winfo_height() - dlg_h) // 2
             dlg.geometry(f"+{max(0, rx)}+{max(0, ry)}")
         except Exception:
             pass
 
         border_c = "#EF4444" if kind == "danger" else ("#F59E0B" if kind == "warning" else COLOR_NEON_CYAN)
         card = ctk.CTkFrame(dlg, fg_color=COLOR_BG_MAIN, corner_radius=14, border_width=2, border_color=border_c)
-        card.pack(fill="both", expand=True, padx=12, pady=12)
+        card.pack(fill="both", expand=True, padx=14, pady=14)
 
+        # アイコン ＋ 見出し
         hdr = ctk.CTkFrame(card, fg_color="transparent")
-        hdr.pack(fill="x", padx=22, pady=(16, 6))
-        ctk.CTkLabel(hdr, text=icon, font=self.F(28)).pack(side="left", padx=(0, 12))
-        ctk.CTkLabel(hdr, text=heading, font=self.F(19, bold=True), text_color=COLOR_TEXT_MAIN).pack(side="left")
+        hdr.pack(fill="x", padx=24, pady=(20, 8))
+        ctk.CTkLabel(hdr, text=icon, font=self.F(32)).pack(side="left", padx=(0, 14))
+        ctk.CTkLabel(hdr, text=heading, font=self.F(21, bold=True), text_color=COLOR_TEXT_MAIN).pack(side="left")
 
-        ctk.CTkLabel(card, text=message, font=self.F(14, bold=False), text_color=COLOR_TEXT_SUB,
-                     justify="left", wraplength=480).pack(fill="x", padx=24, pady=(2, 14))
+        # 本文（文字を大きく・行間もゆったり・文字切れ完全防止）
+        ctk.CTkLabel(
+            card, text=message, font=self.F(16, bold=False), text_color=COLOR_TEXT_SUB,
+            justify="left", wraplength=570
+        ).pack(fill="both", expand=True, padx=26, pady=(4, 16))
 
+        # ボタン列
         btn_row = ctk.CTkFrame(card, fg_color="transparent")
-        btn_row.pack(fill="x", padx=22, pady=(0, 16), side="bottom")
+        btn_row.pack(fill="x", padx=24, pady=(0, 20), side="bottom")
 
         def do_cancel():
             try:
@@ -2011,8 +2017,8 @@ class DictaApp(ctk.CTk):
         dlg.bind("<Escape>", lambda e: do_cancel())
         dlg.bind("<Return>", lambda e: do_confirm())
 
-        self.btn(btn_row, cancel_text, do_cancel, size=15, height=40, width=130, radius=8).pack(side="right", padx=(8, 0))
-        btn_confirm = self.btn(btn_row, confirm_text, do_confirm, size=15, height=40, width=190, kind=kind, radius=8)
+        self.btn(btn_row, cancel_text, do_cancel, size=16, height=44, width=140, radius=8).pack(side="right", padx=(10, 0))
+        btn_confirm = self.btn(btn_row, confirm_text, do_confirm, size=16, height=44, width=205, kind=kind, radius=8)
         btn_confirm.pack(side="right")
         btn_confirm.focus_set()
 
@@ -2033,7 +2039,7 @@ class DictaApp(ctk.CTk):
             title="Dicta — しおり全消去",
             icon="🗑️",
             heading="しおりの一括消去",
-            message=f"現在開いている音声ファイルに記録されている、すべてのしおり（合計 {count} 箇所）を完全に消去します。\n\nこの操作は元に戻せません。本当によろしいですか？",
+            message=f"現在開いている音声ファイルに記録されている、すべてのしおり（合計 {count} 箇所）を完全に消去します。\n\n※この操作を実行すると元に戻すことはできません。本当に消去してよろしいですか？",
             confirm_text="🗑️ すべて消去する",
             cancel_text="キャンセル",
             kind="danger",

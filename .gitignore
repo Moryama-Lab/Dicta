@@ -1,0 +1,23 @@
+# Local User Config (Never commit personal file paths or bookmarks)
+config.json
+
+# Python cache & temp files
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# Audio files
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.flac
+*.wma
+*.ogg
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

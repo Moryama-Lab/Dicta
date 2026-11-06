@@ -604,16 +604,16 @@ class BoostVolumeSlider(tk.Canvas):
         self.img_knob_norm = make_smooth_circle_image(self.r, max(2, int(2.5 * scale)), "#FFFFFF", COLOR_NEON_CYAN)
         self.img_knob_boost = make_smooth_circle_image(self.r, max(2, int(2.5 * scale)), "#FFFFFF", "#FF8C00")
 
-        # 1. 通常ゾーン背景 (0〜100%)
-        self.it_track_norm_bg = self.create_line(0, 0, 0, 0, fill="#132742", width=self.track_th, capstyle="round")
-        # 2. ブーストゾーン背景 (100〜200%) - 最初から鮮烈なオレンジ！
-        self.it_track_boost_bg = self.create_line(0, 0, 0, 0, fill="#522000", width=self.track_th, capstyle="round")
-        # 3. 通常ゾーン進捗 (シアン)
-        self.it_prog_norm = self.create_line(0, 0, 0, 0, fill=COLOR_NEON_CYAN, width=self.track_th, capstyle="round")
-        # 4. ブーストゾーン進捗 (発光オレンジ)
-        self.it_prog_boost = self.create_line(0, 0, 0, 0, fill="#FF8C00", width=self.track_th, capstyle="round")
-        # 5. 100%境界目盛り線
-        self.it_mark_100 = self.create_line(0, 0, 0, 0, fill="#FFFFFF", width=2)
+        # 1. 通常ゾーン背景 (0〜100%) - 境界xmでbutt切断
+        self.it_track_norm_bg = self.create_line(0, 0, 0, 0, fill="#132742", width=self.track_th, capstyle="butt")
+        # 2. ブーストゾーン背景 (100〜200%) - 最初から鮮烈なオレンジ！境界xmでbutt切断
+        self.it_track_boost_bg = self.create_line(0, 0, 0, 0, fill="#522000", width=self.track_th, capstyle="butt")
+        # 3. 通常ゾーン進捗 (シアン) - 境界xmを超えないbutt切断
+        self.it_prog_norm = self.create_line(0, 0, 0, 0, fill=COLOR_NEON_CYAN, width=self.track_th, capstyle="butt")
+        # 4. ブーストゾーン進捗 (発光オレンジ) - 境界xmから始まるbutt切断
+        self.it_prog_boost = self.create_line(0, 0, 0, 0, fill="#FF8C00", width=self.track_th, capstyle="butt")
+        # 5. 100%境界目盛り線 (はみ出しゼロ・最前面リフト)
+        self.it_mark_100 = self.create_line(0, 0, 0, 0, fill="#FFFFFF", width=3)
         # 6. 下部目盛りテキスト
         self.font_scale = (FONT_UI, max(9, int(10 * scale)), "normal")
         self.font_scale_bold = (FONT_UI, max(9, int(10 * scale)), "bold")
@@ -651,7 +651,7 @@ class BoostVolumeSlider(tk.Canvas):
         xm = (x0 + x1) / 2.0  # 100%の位置（中央）
         y = self.track_y
 
-        # 背景トラック（左半分：シアン系ネイビー、右半分：最初からオレンジ！）
+        # 背景トラック（左半分：シアン系ネイビー、右半分：最初からオレンジ！境界xmで完全に分断）
         self.coords(self.it_track_norm_bg, x0, y, xm, y)
         self.coords(self.it_track_boost_bg, xm, y, x1, y)
 
@@ -659,22 +659,24 @@ class BoostVolumeSlider(tk.Canvas):
         ratio = self.volume / 2.0  # 0.0 〜 1.0 (200%で1.0)
         xk = x0 + ratio * (x1 - x0)
 
-        # 進捗の描画
+        # 進捗の描画（境界xmを超えないよう正確にクランプ）
         if self.volume <= 1.0:
-            self.coords(self.it_prog_norm, x0, y, max(x0, xk), y)
+            self.coords(self.it_prog_norm, x0, y, min(xm, max(x0, xk)), y)
             self.itemconfigure(self.it_prog_norm, state="normal")
             self.itemconfigure(self.it_prog_boost, state="hidden")
             self.itemconfigure(self.it_knob, image=self.img_knob_norm)
         else:
             self.coords(self.it_prog_norm, x0, y, xm, y)
             self.itemconfigure(self.it_prog_norm, state="normal")
-            self.coords(self.it_prog_boost, xm, y, max(xm, xk), y)
+            self.coords(self.it_prog_boost, xm, y, max(xm, min(x1, xk)), y)
             self.itemconfigure(self.it_prog_boost, state="normal")
             self.itemconfigure(self.it_knob, image=self.img_knob_boost)
 
-        # 境界線
-        mark_h = int(self.track_th * 1.6)
+        # 境界線（トラックより上下に突き出させ、常に最前面にリフト）
+        mark_h = int(self.track_th + 8 * self.s)
         self.coords(self.it_mark_100, xm, y - mark_h // 2, xm, y + mark_h // 2)
+        self.lift(self.it_mark_100)
+        self.lift(self.it_knob)
 
         # 下部ラベル
         lbl_y = y + int(14 * self.s)
@@ -823,9 +825,8 @@ class DictaApp(ctk.CTk):
         self.apply_eq_gains(self.config.get("eq_gains", [-4.0, -1.0, 2.0, 6.0, 3.0, -2.0]))
         self.set_speed(self.config.get("speed", 1.0))
         self.set_pitch(self.config.get("pitch", 0.0))
-        init_vol = self.config.get("volume", 0.9)
-        if init_vol > 1.0:
-            self.boost_warning_dismissed = True
+        self.boost_warning_dismissed = False
+        init_vol = min(1.0, float(self.config.get("volume", 0.9)))
         self.set_volume_ui(init_vol, check_boost=False)
 
         # Hotkeys
@@ -1962,9 +1963,9 @@ class DictaApp(ctk.CTk):
     def show_custom_confirm_dialog(self, title, icon, heading, message, confirm_text, cancel_text="キャンセル", kind="danger", on_confirm=None, on_cancel=None):
         dlg = ctk.CTkToplevel(self)
         dlg.title(title)
-        dlg_w, dlg_h = 650, 320
+        dlg_w, dlg_h = 820, 420
         dlg.geometry(f"{dlg_w}x{dlg_h}")
-        dlg.minsize(580, 280)
+        dlg.minsize(740, 380)
         dlg.configure(fg_color="#0A1220")
         dlg.transient(self)
         dlg.grab_set()
@@ -1978,24 +1979,24 @@ class DictaApp(ctk.CTk):
             pass
 
         border_c = "#EF4444" if kind == "danger" else ("#F59E0B" if kind == "warning" else COLOR_NEON_CYAN)
-        card = ctk.CTkFrame(dlg, fg_color=COLOR_BG_MAIN, corner_radius=14, border_width=2, border_color=border_c)
-        card.pack(fill="both", expand=True, padx=14, pady=14)
+        card = ctk.CTkFrame(dlg, fg_color=COLOR_BG_MAIN, corner_radius=16, border_width=2, border_color=border_c)
+        card.pack(fill="both", expand=True, padx=16, pady=16)
 
         # アイコン ＋ 見出し
         hdr = ctk.CTkFrame(card, fg_color="transparent")
-        hdr.pack(fill="x", padx=24, pady=(20, 8))
-        ctk.CTkLabel(hdr, text=icon, font=self.F(32)).pack(side="left", padx=(0, 14))
-        ctk.CTkLabel(hdr, text=heading, font=self.F(21, bold=True), text_color=COLOR_TEXT_MAIN).pack(side="left")
+        hdr.pack(fill="x", padx=28, pady=(22, 10))
+        ctk.CTkLabel(hdr, text=icon, font=self.F(36)).pack(side="left", padx=(0, 16))
+        ctk.CTkLabel(hdr, text=heading, font=self.F(24, bold=True), text_color=COLOR_TEXT_MAIN).pack(side="left")
 
-        # 本文（文字を大きく・行間もゆったり・文字切れ完全防止）
-        ctk.CTkLabel(
-            card, text=message, font=self.F(16, bold=False), text_color=COLOR_TEXT_SUB,
-            justify="left", wraplength=570
-        ).pack(fill="both", expand=True, padx=26, pady=(4, 16))
-
-        # ボタン列
+        # ボタン列を先に下部にパック（文字とボタンの重なり・文字切れを物理的に完全防止）
         btn_row = ctk.CTkFrame(card, fg_color="transparent")
-        btn_row.pack(fill="x", padx=24, pady=(0, 20), side="bottom")
+        btn_row.pack(fill="x", padx=28, pady=(0, 24), side="bottom")
+
+        # 本文（文字を特大18pt・行間ゆったり・文字切れ完全防止）
+        ctk.CTkLabel(
+            card, text=message, font=self.F(18, bold=False), text_color=COLOR_TEXT_SUB,
+            justify="left", wraplength=720
+        ).pack(fill="both", expand=True, padx=28, pady=(6, 16))
 
         def do_cancel():
             try:
@@ -2017,8 +2018,8 @@ class DictaApp(ctk.CTk):
         dlg.bind("<Escape>", lambda e: do_cancel())
         dlg.bind("<Return>", lambda e: do_confirm())
 
-        self.btn(btn_row, cancel_text, do_cancel, size=16, height=44, width=140, radius=8).pack(side="right", padx=(10, 0))
-        btn_confirm = self.btn(btn_row, confirm_text, do_confirm, size=16, height=44, width=205, kind=kind, radius=8)
+        self.btn(btn_row, cancel_text, do_cancel, size=18, height=50, width=170, radius=8).pack(side="right", padx=(12, 0))
+        btn_confirm = self.btn(btn_row, confirm_text, do_confirm, size=18, height=50, width=260, kind=kind, radius=8)
         btn_confirm.pack(side="right")
         btn_confirm.focus_set()
 

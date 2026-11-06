@@ -34,10 +34,11 @@ def register_open_with():
     # Dicta.exe が存在すればそれを最優先（Windows Explorer のプログラムから開くに「Python」ではなく「Dicta」と美しく表示される）
     if os.path.exists(exe_path):
         cmd = f'"{exe_path}" "%1"'
-        target_icon = f'"{exe_path}",0'
     else:
         cmd = f'"{pythonw_exe}" "{dicta_py}" "%1"'
-        target_icon = f'"{ico_path}",0' if os.path.exists(ico_path) else f'"{pythonw_exe}",0'
+    
+    # アイコンは常に dicta.ico を直接指定（EXE内部の古いキャッシュ問題を100%回避）
+    target_icon = f'"{ico_path}",0' if os.path.exists(ico_path) else f'"{exe_path}",0'
 
     try:
         # 1. HKEY_CURRENT_USER\Software\Classes\Applications\Dicta.exe
@@ -78,7 +79,7 @@ def register_open_with():
 Set sc = ws.CreateShortcut("{shortcut_path}")
 sc.TargetPath = "{exe_path}"
 sc.WorkingDirectory = "{dicta_dir}"
-sc.IconLocation = "{exe_path},0"
+sc.IconLocation = "{ico_path},0"
 sc.Description = "Dicta - 音声文字起こし再生スタジオ"
 sc.WindowStyle = 1
 sc.Save

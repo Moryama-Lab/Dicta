@@ -41,6 +41,8 @@ except Exception:
 
 # CustomTkinter固有のPer-Monitor DPI自動再計算・リスケール処理を無効化
 ctk.deactivate_automatic_dpi_awareness()
+# 全てのボタン・文字・入力欄を大きく見やすいプロ仕様サイズ（1.28倍）に統一
+ctk.set_widget_scaling(1.28)
 from customtkinter.windows.widgets.scaling import ScalingTracker
 ScalingTracker.check_dpi_scaling = lambda *args, **kwargs: None
 
@@ -728,7 +730,7 @@ class DictaApp(ctk.CTk):
         "sub_del": dict(fg_color="#2A1018", hover_color="#401824", border_color="#E11D48", text_color="#FDA4AF"),
     }
 
-    def btn(self, parent, text, cmd, size=17, height=44, width=None, kind="normal", radius=10):
+    def btn(self, parent, text, cmd, size=18, height=48, width=None, kind="normal", radius=10):
         kw = dict(text=text, command=cmd, height=height, corner_radius=radius, border_width=2, font=self.F(size))
         kw.update(self.BTN_STYLES[kind])
         if width:
@@ -808,11 +810,11 @@ class DictaApp(ctk.CTk):
         ctk.CTkLabel(brand, text="Dicta", font=self.F(28), text_color=COLOR_TEXT_MAIN).pack(side="left")
         ctk.CTkLabel(brand, text="ディクタ ｜ 文字起こし再生スタジオ", font=self.F(15), text_color=COLOR_NEON_CYAN).pack(side="left", padx=(12, 0), pady=(4, 0))
 
-        self.btn_top = self.btn(top_bar, "最前面: OFF", self.toggle_always_on_top, size=15, height=38, width=150)
+        self.btn_top = self.btn(top_bar, "最前面: OFF", self.toggle_always_on_top, size=16, height=42, width=155)
         self.btn_top.pack(side="right", padx=4)
-        self.btn_mini = self.btn(top_bar, "ミニモード", self.toggle_mini_mode, size=15, height=38, width=140)
+        self.btn_mini = self.btn(top_bar, "ミニモード", self.toggle_mini_mode, size=16, height=42, width=145)
         self.btn_mini.pack(side="right", padx=4)
-        self.btn_settings = self.btn(top_bar, "設定・キー", self.show_settings_dialog, size=15, height=38, width=150, kind="accent")
+        self.btn_settings = self.btn(top_bar, "設定・キー", self.show_settings_dialog, size=16, height=42, width=155, kind="accent")
         self.btn_settings.pack(side="right", padx=4)
 
         # ---------- 2. File bar ----------
@@ -820,9 +822,9 @@ class DictaApp(ctk.CTk):
         file_box.pack(fill="x", pady=4)
         self.lbl_filename = ctk.CTkLabel(
             file_box, text="音声ファイル未選択 — 右のボタン、またはドラッグ＆ドロップで開きます",
-            anchor="w", font=self.F(18), text_color=COLOR_TEXT_MAIN)
+            anchor="w", font=self.F(19), text_color=COLOR_TEXT_MAIN)
         self.lbl_filename.pack(side="left", fill="x", expand=True, padx=16, pady=8)
-        self.btn(file_box, "ファイルを開く", self.open_file_dialog, size=16, height=40, width=190,
+        self.btn(file_box, "ファイルを開く", self.open_file_dialog, size=17, height=44, width=200,
                  kind="primary").pack(side="right", padx=10, pady=6)
 
         # ---------- 3. Counter & Copy Box (時間コピー ＆ 区間コピー並び) ----------
@@ -840,13 +842,13 @@ class DictaApp(ctk.CTk):
         self.time_nums_row.pack(anchor="w")
 
         # 時間表示の枠サイズを固定（編集時にも一切枠が拡大・カクつかないコンテナ）
-        self.time_cell = ctk.CTkFrame(self.time_nums_row, fg_color="transparent", width=460, height=84)
+        self.time_cell = ctk.CTkFrame(self.time_nums_row, fg_color="transparent", width=480, height=88)
         self.time_cell.pack(side="left")
         self.time_cell.pack_propagate(False)
 
-        self.lbl_time = ctk.CTkLabel(self.time_cell, text="00:00:00.0", font=self.F(74, mono=True), text_color=COLOR_NEON_CYAN)
+        self.lbl_time = ctk.CTkLabel(self.time_cell, text="00:00:00.0", font=self.F(76, mono=True), text_color=COLOR_NEON_CYAN)
         self.lbl_time.pack(fill="both", expand=True)
-        self.lbl_duration = ctk.CTkLabel(self.time_nums_row, text="/ 00:00:00", font=self.F(30, mono=True), text_color=COLOR_TEXT_SUB)
+        self.lbl_duration = ctk.CTkLabel(self.time_nums_row, text="/ 00:00:00", font=self.F(32, mono=True), text_color=COLOR_TEXT_SUB)
         self.lbl_duration.pack(side="left", padx=14, pady=(24, 0))
         self._make_time_label_editable(self.lbl_time, "main")
 
@@ -857,14 +859,14 @@ class DictaApp(ctk.CTk):
         copy_row = ctk.CTkFrame(acol, fg_color="transparent")
         copy_row.pack(fill="x", pady=(0, 6))
 
-        self.btn_copy = self.btn(copy_row, "📋 時間コピー", self.action_counter_copy, size=17, height=48, width=160, kind="accent")
+        self.btn_copy = self.btn(copy_row, "📋 時間コピー", self.action_counter_copy, size=18, height=52, width=170, kind="accent")
         self.btn_copy.pack(side="left", padx=(0, 6))
 
-        self.btn_copy_range = self.btn(copy_row, "⏱ 区間コピー", self.action_range_copy, size=17, height=48, width=160, kind="accent")
+        self.btn_copy_range = self.btn(copy_row, "⏱ 区間コピー", self.action_range_copy, size=18, height=52, width=170, kind="accent")
         self.btn_copy_range.pack(side="left")
 
         self.seg_copy = ctk.CTkSegmentedButton(
-            acol, values=["秒まで", "ミリ秒まで"], font=self.F(15), height=34,
+            acol, values=["秒まで", "ミリ秒まで"], font=self.F(16), height=38,
             selected_color=COLOR_CYAN_MID, selected_hover_color=COLOR_CYAN_DARK,
             unselected_color=COLOR_BG_BUTTON, command=self.on_copy_precision_change)
         self.seg_copy.pack(fill="x")
@@ -888,8 +890,8 @@ class DictaApp(ctk.CTk):
         ctrl = ctk.CTkFrame(transport_box, fg_color="transparent")
         ctrl.pack(fill="x", padx=14, pady=(4, 10))
 
-        # 一番左の「最初から」と右側の「しおり追加」「しおり全消去」を同一サイズ（幅155px・高さ48px・文字16pt）に統一
-        self.btn_stop = self.btn(ctrl, "⏮ 最初から", self.action_stop, size=16, height=48, width=155, kind="sub_head", radius=10)
+        # 一番左の「最初から」と右側の「しおり追加」「しおり全消去」を同一サイズ（幅165px・高さ52px・文字17pt）に統一
+        self.btn_stop = self.btn(ctrl, "⏮ 最初から", self.action_stop, size=17, height=52, width=165, kind="sub_head", radius=10)
         self.btn_stop.pack(side="left", padx=(4, 10))
 
         # メイン再生3グループ（「5秒戻る・再生・5秒進む」は大きく均等に展開）
@@ -898,20 +900,20 @@ class DictaApp(ctk.CTk):
         for col_idx in range(3):
             main_grp.grid_columnconfigure(col_idx, weight=1, uniform="main_transport")
 
-        self.btn_rewind = self.btn(main_grp, "◀◀ 5秒戻る", self.action_rewind, size=18, height=48, kind="accent", radius=10)
+        self.btn_rewind = self.btn(main_grp, "◀◀ 5秒戻る", self.action_rewind, size=19, height=52, kind="accent", radius=10)
         self.btn_rewind.grid(row=0, column=0, sticky="ew", padx=4)
 
-        self.btn_play = self.btn(main_grp, "▶ 再生", self.action_play_pause, size=20, height=48, kind="play", radius=10)
+        self.btn_play = self.btn(main_grp, "▶ 再生", self.action_play_pause, size=22, height=52, kind="play", radius=10)
         self.btn_play.grid(row=0, column=1, sticky="ew", padx=4)
 
-        self.btn_forward = self.btn(main_grp, "▶▶ 5秒進む", self.action_forward, size=18, height=48, kind="accent", radius=10)
+        self.btn_forward = self.btn(main_grp, "▶▶ 5秒進む", self.action_forward, size=19, height=52, kind="accent", radius=10)
         self.btn_forward.grid(row=0, column=2, sticky="ew", padx=4)
 
-        # しおり操作グループ（最初からボタンと完全同一サイズ：幅155px・高さ48px）
-        self.btn_bm_add = self.btn(ctrl, "しおり追加", self.action_bookmark_add, size=16, height=48, width=155, kind="sub_bm", radius=10)
+        # しおり操作グループ（最初からボタンと完全同一サイズ：幅165px・高さ52px・文字17pt）
+        self.btn_bm_add = self.btn(ctrl, "しおり追加", self.action_bookmark_add, size=17, height=52, width=165, kind="sub_bm", radius=10)
         self.btn_bm_add.pack(side="left", padx=(10, 4))
 
-        self.btn_bm_clear = self.btn(ctrl, "しおり全消去", self.action_bookmark_clear_all, size=16, height=48, width=155, kind="sub_del", radius=10)
+        self.btn_bm_clear = self.btn(ctrl, "しおり全消去", self.action_bookmark_clear_all, size=17, height=52, width=165, kind="sub_del", radius=10)
         self.btn_bm_clear.pack(side="left", padx=4)
 
         self.refresh_jump_labels()

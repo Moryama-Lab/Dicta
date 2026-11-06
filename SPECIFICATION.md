@@ -32,11 +32,12 @@ dicta/
 ├── dicta.py             # メインアプリケーション（GUI、イベントループ、設定管理、解析描画）
 ├── bass_engine.py       # BASS Native C API ctypesバインディング＆再生エンジン
 ├── hotkey_manager.py    # 低遅延・自己修復型グローバルホットキー監視マネージャー
+├── register_open_with.py# Windows 右クリック「プログラムから開く」登録・解除スクリプト
 ├── config.default.json  # 初期配布用デフォルト設定テンプレート（個人情報ゼロ）
 ├── config.json          # ユーザー環境ローカル設定ファイル（自動生成・Git除外）
 ├── README.md            # 一般利用者向け導入・操作ガイド
 ├── SPECIFICATION.md     # 本技術仕様書
-├── dicta.ico            # Windows用マルチ解像度アプリアイコン
+├── dicta.ico            # Windows用マルチ解像度アプリアイコン（太枠ネオンシアン＋発光グロー）
 ├── dicta_logo.png       # アプリケーションヘッダー用ロゴ画像
 ├── 起動_Dicta.bat        # ワンクリック起動バッチ
 ├── bass.dll             # 64bit BASS Core Native DLL (v2.4.17)
@@ -136,16 +137,34 @@ Wordやブラウザが最前面にある状態でもバックグラウンドで�
 2. **副系: Win32 `GetAsyncKeyState` (ポーリング自己修復方式)**:
    - 他の常駐ソフトウェアが既に同一のホットキーを独占・競合している場合、`RegisterHotKey` の失敗を検知し、自動的に `GetAsyncKeyState` による15msインターバルの高精度ポーリングにフォールバック。
 
-### 5.2 シンプルダイレクトキー入力（Direct Key Capture & Large Tab UI）
+### 5.2 選択式キー設定ダイアログ（Checkbox + Dropdown Selection & Large Tab UI）
 - 設定ダイアログ上部には高視認性の大型2連タブボタン（高さ52px・20pt太字：「⌨ キー設定」「⚙ 再生・コピー・安全設定」）を配置。
-- 設定ダイアログを開いている間は `hotkey_mgr.stop()` によりOSホットキーフックを一時解除。これにより、既に登録済みのショートカットや6キー片手マクロキーボードのボタンをそのまま押してもOS側に横取りされず、100%確実に入力欄へ届く。
-- 一覧行のキー枠クリック（インライン入力）または「変更」ボタンのシンプル入力画面にて、Win32 Virtual-Key Code (`event.keycode`) と物理修飾キー状態を直接解決。単体キー、同時押し、片手マクロキーボードからの一括送信、1キーずつの順不同入力のすべてにおいて、押したキーがそのまま素直に入力される設計を実現。
+- 「変更」ボタンを押すと、修飾キー（`Shift`, `Ctrl`, `Alt` の3つの明確なチェックボックス）とメインキー（F1〜F12、英数字、方向キー、テンキーNumPad、無変換/変換などを網羅したドロップダウンメニュー）の組み合わせによる選択式エディタが起動。
+- マウス操作のみで誰でも100%確実に好みの組み合わせ（単体キー、`Shift+Ctrl+Alt+任意のキー` 等）を設定可能。
+- リアルタイムで「設定プレビュー（例: `Ctrl + Shift + F5`）」が表示され、他の機能との重複が存在する場合は警告メッセージが即時提示される安全設計。
 
 ---
 
-## 6. 設定ファイル管理 (`config.json` / `config.default.json`)
+## 6. Windows シェル連携 ＆ マルチモニター最適化
 
-### 6.1 スキーマ仕様
+### 6.1 Windows「プログラムから開く」への安全な登録 (`register_open_with.py`)
+- 音源ファイル（.mp3, .wav, .m4a, .aac, .flac, .wma, .ogg 等）の右クリックメニュー「プログラムから開く」の選択肢一覧に Dicta を登録。
+- **絶対規律**: ユーザーの「既定のアプリ（デフォルトプレーヤー）」は一切変更せず、`HKEY_CURRENT_USER\Software\Classes\Applications\Dicta.exe` および各拡張子の `OpenWithList\Dicta.exe` のみに登録。
+- GUI設定画面（「⚙ 再生・コピー・安全設定」タブ）から現在の登録状況をリアルタイム確認でき、ワンクリックで登録／解除が可能。
+- `dicta.py` は `sys.argv[1]` のコマンドライン引数を解釈し、エクスプローラーから選択された音源を起動直後に自動ロード。
+
+### 6.2 マルチモニター（画面拡張）におけるDPI安定化
+- ノートPC等の高スケーリング画面（125%〜150%）と、外付けの大型モニター（100%）間でウィンドウを移動した際、CustomTkinterがPer-Monitor DPI変更を検知してウィンドウサイズ（geometry）を強制再計算・縮小拡大してしまう現象を抑止。
+- `ctypes.windll.shcore.SetProcessDpiAwareness(1)`（System DPI Aware）および `ctk.deactivate_automatic_dpi_awareness()` の適用により、Windows OSのDWM側で単一空間スケーリングを完結させ、モニター跨ぎ時のチラつき・カクつき・サイズ急変を完全に防止。
+
+### 6.3 高視認性ネオンアイコン (`dicta.ico` / `dicta_logo.png`)
+- 黒背景のデスクトップ環境でも埋もれず明瞭に視認できるよう、外枠に幅24pxの鮮明なネオンシアン（`#00F5FF`）ソリッド境界線と多層発光グロー（Cyan Glow）を施したマルチ解像度ICO（256, 128, 64, 48, 32, 16）を生成。
+
+---
+
+## 7. 設定ファイル管理 (`config.json` / `config.default.json`)
+
+### 7.1 スキーマ仕様
 ```json
 {
   "config_version": 3,
@@ -177,11 +196,11 @@ Wordやブラウザが最前面にある状態でもバックグラウンドで�
 }
 ```
 
-### 6.2 配布・共有時のセキュリティ規律
+### 7.2 配布・共有時のセキュリティ規律
 - `config.json` はローカル環境固有の最終再生ファイルパス（`last_file`）や個別音声のブックマーク履歴（`bookmarks_dict`）を保持するため、**Git管理から除外（.gitignore）**。
 - 配布リポジトリには `config.default.json` のみを同梱し、アプリ起動時に `config.json` が存在しない場合は `config.default.json` から安全に自動生成される。これにより、開発者・配布者の個人ファイルパスや研究情報が第三者に漏洩するリスクを恒久的にゼロとする。
 
 ---
 
-## 7. 開発・クレジット
+## 8. 開発・クレジット
 - **Author & Developer**: **Moryama-Lab** & **Google Antigravity (Gemini 4 Argon)**

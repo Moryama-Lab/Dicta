@@ -32,18 +32,26 @@ from tkinter import filedialog, messagebox
 from PIL import Image, ImageDraw, ImageTk
 import customtkinter as ctk
 
-# 1. Windows OSレベルで System DPI Aware (1) を適用（Orbit互換：動的再計算・チラつき停止）
+# 1. Windows OSレベルで System DPI Aware (1) を適用
+# マルチモニター（画面拡張）間でウィンドウを移動した際の、急激なサイズ変化・カクつき・チラつきを完全に防止
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
 except Exception:
     pass
 
+# CustomTkinter固有のPer-Monitor DPI自動再計算・リスケール処理を無効化
+ctk.deactivate_automatic_dpi_awareness()
 from customtkinter.windows.widgets.scaling import ScalingTracker
-ScalingTracker.get_window_dpi_scaling = lambda *args, **kwargs: 1.25
 ScalingTracker.check_dpi_scaling = lambda *args, **kwargs: None
 
 from bass_engine import BassAudioEngine
 from hotkey_manager import HotkeyManager, parse_hotkey_string, VK_TO_NAME, VK_KEYS
+try:
+    from register_open_with import register_open_with, unregister_open_with, is_registered
+except Exception:
+    register_open_with = None
+    unregister_open_with = None
+    is_registered = lambda: False
 
 user32 = ctypes.windll.user32
 
@@ -666,8 +674,16 @@ class DictaApp(ctk.CTk):
         self.after(40, self.update_playback_timer)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # ファイル復元
-        if self.config.get("resume_last_file") and self.config.get("last_file"):
+        # コマンドライン引数（エクスプローラーの「プログラムから開く」等）による音源直接指定
+        opened_via_argv = False
+        if len(sys.argv) > 1:
+            arg_candidate = sys.argv[1].strip('"').strip()
+            if arg_candidate and os.path.isfile(arg_candidate):
+                opened_via_argv = True
+                self.after(200, lambda f=os.path.abspath(arg_candidate): self.load_audio(f))
+
+        # ファイル復元（引数指定がない場合のみ前回位置から再開）
+        if not opened_via_argv and self.config.get("resume_last_file") and self.config.get("last_file"):
             last_f = self.config.get("last_file")
             if os.path.exists(last_f):
                 self.after(150, lambda: self.resume_file(last_f, self.config.get("last_position", 0.0)))
@@ -2015,69 +2031,44 @@ class DictaApp(ctk.CTk):
         )
         btn_tab_gen.grid(row=0, column=1, sticky="ew", padx=6, pady=6)
 
-        # --- キーイベント解析ヘルパー（何でも押したキーがそのまま入る） ---
-        MOD_KEYCODES = {
-            16: "Shift", 160: "Shift", 161: "Shift",
-            17: "Ctrl",  162: "Ctrl",  163: "Ctrl",
-            18: "Alt",   164: "Alt",   165: "Alt",
-            91: "Win",   92: "Win",
-        }
-        MOD_KEYSYMS = {
-            "SHIFT_L": "Shift", "SHIFT_R": "Shift",
-            "CONTROL_L": "Ctrl", "CONTROL_R": "Ctrl",
-            "ALT_L": "Alt", "ALT_R": "Alt",
-            "SUPER_L": "Win", "SUPER_R": "Win", "WIN_L": "Win", "WIN_R": "Win",
-        }
-
-        def process_key_press(event, state):
-            """
-            押されたキーイベントを受け取り、(has_main, raw_hotkey_str, display_str) を返す。
-            単体キー、同時押し、片手マクロキーボード、順不同の1キーずつ入力のすべてに完全対応。
-            """
-            kc = getattr(event, "keycode", 0)
-            sym = (getattr(event, "keysym", "") or "").upper()
-
-            if state.get("fresh", True):
-                state["mods"].clear()
-                state["main"] = ""
-                state["fresh"] = False
-
-            s, c, a = get_current_modifiers()
-            if s: state["mods"].add("Shift")
-            if c: state["mods"].add("Ctrl")
-            if a: state["mods"].add("Alt")
-
-            if kc in MOD_KEYCODES or sym in MOD_KEYSYMS:
-                m_name = MOD_KEYCODES.get(kc) or MOD_KEYSYMS.get(sym)
-                if m_name:
-                    state["mods"].add(m_name)
-            else:
-                if kc in VK_TO_NAME:
-                    main_k = VK_TO_NAME[kc]
-                elif sym in VK_KEYS:
-                    main_k = VK_TO_NAME.get(VK_KEYS[sym], sym)
-                elif len(sym) == 1:
-                    main_k = sym.upper()
-                elif kc > 0:
-                    main_k = f"VK{kc}"
-                else:
-                    return False, "", ""
-                state["main"] = main_k
-
-            ordered = [m for m in ("Shift", "Ctrl", "Alt", "Win") if m in state["mods"]]
-            if state["main"]:
-                ordered.append(state["main"])
-            if not ordered:
-                return False, "", ""
-            raw_str = "+".join(ordered)
-            _, _, canon = parse_hotkey_string(raw_str)
-            disp = canon if canon else " + ".join(ordered)
-            return bool(state["main"]), raw_str, disp
+        # --- キー選択肢リスト（誰でも確実に選べるドロップダウン用） ---
+        KEY_CHOICES = [
+            ("（未設定）", ""),
+            ("F1", "F1"), ("F2", "F2"), ("F3", "F3"), ("F4", "F4"),
+            ("F5", "F5"), ("F6", "F6"), ("F7", "F7"), ("F8", "F8"),
+            ("F9", "F9"), ("F10", "F10"), ("F11", "F11"), ("F12", "F12"),
+            *[(c, c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"],
+            *[(str(i), str(i)) for i in range(10)],
+            ("Space（空白）", "SPACE"),
+            ("Enter（決定）", "ENTER"),
+            ("Tab", "TAB"),
+            ("Esc", "ESC"),
+            ("BackSpace", "BACKSPACE"),
+            ("↑（上矢印）", "UP"),
+            ("↓（下矢印）", "DOWN"),
+            ("←（左矢印）", "LEFT"),
+            ("→（右矢印）", "RIGHT"),
+            ("Home", "HOME"),
+            ("End", "END"),
+            ("PageUp", "PAGEUP"),
+            ("PageDown", "PAGEDOWN"),
+            ("Insert", "INSERT"),
+            ("Delete", "DELETE"),
+            ("テンキー 0", "NUM0"), ("テンキー 1", "NUM1"), ("テンキー 2", "NUM2"),
+            ("テンキー 3", "NUM3"), ("テンキー 4", "NUM4"), ("テンキー 5", "NUM5"),
+            ("テンキー 6", "NUM6"), ("テンキー 7", "NUM7"), ("テンキー 8", "NUM8"),
+            ("テンキー 9", "NUM9"), ("テンキー +", "NUM+"), ("テンキー -", "NUM-"),
+            ("テンキー *", "NUM*"), ("テンキー /", "NUM/"), ("テンキー .", "NUM."),
+            ("無変換", "無変換"),
+            ("変換", "変換"),
+        ]
+        KEY_LABEL_TO_VAL = {lbl: val for lbl, val in KEY_CHOICES}
+        KEY_VAL_TO_LABEL = {val: lbl for lbl, val in KEY_CHOICES if val}
 
         # --- キー設定タブの中身 ---
         ctk.CTkLabel(
             tab_keys,
-            text="変更したい機能のキー枠（または「変更」）をクリックして、そのままキーボードを押してください。",
+            text="設定したい機能の「変更」ボタンを押し、チェックボックスと選択肢から確実にキーを指定できます。",
             font=self.F(16), text_color=COLOR_TEXT_MAIN
         ).pack(anchor="w", pady=(2, 6))
 
@@ -2086,11 +2077,8 @@ class DictaApp(ctk.CTk):
 
         current_hotkeys = dict(self.config.get("hotkeys", {}))
         key_vars = {}
-        key_btns = {}
         _ok, fb = self.hotkey_mgr.get_status()
         fb_actions = {a for a, _ in fb}
-        active_inline_ak = [None]
-        inline_state = {"mods": set(), "main": "", "fresh": True}
 
         def apply_hotkey_assignment(target_ak, new_raw_str, parent_win=dlg):
             if not new_raw_str:
@@ -2112,96 +2100,145 @@ class DictaApp(ctk.CTk):
             key_vars[target_ak].set(canon or new_raw_str)
             return True
 
-        def stop_inline_capture():
-            prev_ak = active_inline_ak[0]
-            active_inline_ak[0] = None
-            if prev_ak and prev_ak in key_btns:
-                _, _, canon = parse_hotkey_string(current_hotkeys.get(prev_ak, ""))
-                key_vars[prev_ak].set(canon or "（未設定）")
-                key_btns[prev_ak].configure(fg_color="#091426", border_color=COLOR_BORDER_SUBTLE, text_color=COLOR_NEON_CYAN)
-
-        def start_inline_capture(action_key):
-            stop_inline_capture()
-            active_inline_ak[0] = action_key
-            inline_state["mods"].clear()
-            inline_state["main"] = ""
-            inline_state["fresh"] = True
-            key_vars[action_key].set("▶ キーを押してください...")
-            key_btns[action_key].configure(fg_color="#0B2922", border_color=COLOR_PLAY_ACTIVE, text_color=COLOR_PLAY_ACTIVE)
-            dlg.focus_set()
-
-        def on_dlg_keypress(event):
-            ak = active_inline_ak[0]
-            if not ak:
-                return
-            _has_main, raw_str, disp = process_key_press(event, inline_state)
-            if raw_str:
-                apply_hotkey_assignment(ak, raw_str, parent_win=dlg)
-            return "break"
-
-        dlg.bind("<KeyPress>", on_dlg_keypress)
-
         def edit_key_dialog(action_key):
-            """「変更」ボタンを押したときの、押したキーがそのまま入るだけの超シンプル画面"""
-            stop_inline_capture()
+            """誰でも迷わず確実に設定できるチェックボックス＋ドロップダウン選択式ダイアログ"""
             ed = ctk.CTkToplevel(dlg)
-            ed.title(f"キー入力: {HOTKEY_NAMES.get(action_key, action_key)}")
-            ed.geometry("540x290")
+            ed.title(f"キー設定: {HOTKEY_NAMES.get(action_key, action_key)}")
+            ed.geometry("560x430")
             ed.resizable(False, False)
             ed.configure(fg_color=COLOR_BG_MAIN)
             ed.transient(dlg)
             ed.grab_set()
 
             p = ctk.CTkFrame(ed, fg_color="transparent")
-            p.pack(fill="both", expand=True, padx=24, pady=20)
+            p.pack(fill="both", expand=True, padx=24, pady=18)
 
-            ctk.CTkLabel(p, text=HOTKEY_NAMES.get(action_key, action_key), font=self.F(19), text_color=COLOR_TEXT_MAIN).pack(anchor="w")
-            ctk.CTkLabel(p, text="キーボード（または片手キーボード）で使いたいキーを押してください:",
-                         font=self.F(14), text_color=COLOR_TEXT_SUB).pack(anchor="w", pady=(4, 12))
+            ctk.CTkLabel(p, text=f"機能: {HOTKEY_NAMES.get(action_key, action_key)}", font=self.F(19), text_color=COLOR_TEXT_MAIN).pack(anchor="w")
+            ctk.CTkLabel(p, text="組み合わせる修飾キーにチェックを入れ、キーを選択してください:",
+                         font=self.F(14), text_color=COLOR_TEXT_SUB).pack(anchor="w", pady=(2, 10))
 
             cur_raw = current_hotkeys.get(action_key, "")
             _, _, cur_canon = parse_hotkey_string(cur_raw)
-            captured_raw = [cur_raw]
-            dlg_state = {"mods": set(), "main": "", "fresh": True}
 
-            box = ctk.CTkLabel(
-                p,
-                text=cur_canon if cur_canon else "（キーを押してください）",
-                font=self.F(24, bold=True, mono=True),
-                height=72,
-                fg_color="#08162B",
-                corner_radius=12,
-                text_color=COLOR_PLAY_ACTIVE if cur_canon else COLOR_TEXT_SUB
+            # 現在の設定から Shift, Ctrl, Alt およびメインキーを抽出
+            cur_parts = [part.strip().upper() for part in cur_raw.split("+")] if cur_raw else []
+            has_shift = any("SHIFT" in part for part in cur_parts)
+            has_ctrl = any("CTRL" in part or "CONTROL" in part for part in cur_parts)
+            has_alt = any("ALT" in part for part in cur_parts)
+
+            main_part = ""
+            for part in cur_parts:
+                if part not in ("SHIFT", "CTRL", "CONTROL", "ALT", "WIN"):
+                    main_part = part
+                    break
+
+            # 1. 修飾キー（チェックボックス）
+            mod_card = ctk.CTkFrame(p, fg_color="#0A1426", corner_radius=10, border_width=1, border_color="#1E3A5F")
+            mod_card.pack(fill="x", pady=(0, 10), ipady=6)
+            ctk.CTkLabel(mod_card, text="1. 修飾キー（必要なものをチェック）:", font=self.F(14), text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=12, pady=(4, 6))
+
+            chks_frame = ctk.CTkFrame(mod_card, fg_color="transparent")
+            chks_frame.pack(fill="x", padx=12, pady=(0, 4))
+            cb_shift = ctk.CTkCheckBox(chks_frame, text="Shift", font=self.F(16), command=lambda: update_preview())
+            cb_shift.pack(side="left", padx=(0, 16))
+            if has_shift:
+                cb_shift.select()
+
+            cb_ctrl = ctk.CTkCheckBox(chks_frame, text="Ctrl", font=self.F(16), command=lambda: update_preview())
+            cb_ctrl.pack(side="left", padx=(0, 16))
+            if has_ctrl:
+                cb_ctrl.select()
+
+            cb_alt = ctk.CTkCheckBox(chks_frame, text="Alt", font=self.F(16), command=lambda: update_preview())
+            cb_alt.pack(side="left", padx=(0, 16))
+            if has_alt:
+                cb_alt.select()
+
+            # 2. メインキー選択（ドロップダウン）
+            key_card = ctk.CTkFrame(p, fg_color="#0A1426", corner_radius=10, border_width=1, border_color="#1E3A5F")
+            key_card.pack(fill="x", pady=(0, 10), ipady=6)
+            ctk.CTkLabel(key_card, text="2. キーを選択:", font=self.F(14), text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=12, pady=(4, 6))
+
+            initial_choice = KEY_VAL_TO_LABEL.get(main_part, "（未設定）")
+            # 部分一致で探す
+            if initial_choice == "（未設定）" and main_part:
+                for lbl, val in KEY_CHOICES:
+                    if val.upper() == main_part.upper():
+                        initial_choice = lbl
+                        break
+
+            opt_key = ctk.CTkOptionMenu(
+                key_card,
+                values=[lbl for lbl, _ in KEY_CHOICES],
+                width=340,
+                height=38,
+                font=self.F(15),
+                dropdown_font=self.F(15),
+                fg_color=COLOR_BG_BUTTON,
+                button_color=COLOR_CYAN_MID,
+                command=lambda choice: update_preview()
             )
-            box.pack(fill="x", pady=(0, 18))
+            opt_key.pack(fill="x", padx=12, pady=(0, 6))
+            opt_key.set(initial_choice)
 
-            def on_ed_key(event):
-                _has_main, raw_str, disp = process_key_press(event, dlg_state)
-                if raw_str:
-                    captured_raw[0] = raw_str
-                    box.configure(text=disp, text_color=COLOR_PLAY_ACTIVE)
-                return "break"
+            # 3. プレビュー表示枠
+            prev_frame = ctk.CTkFrame(p, fg_color="#070E1C", corner_radius=10, border_width=2, border_color=COLOR_NEON_CYAN)
+            prev_frame.pack(fill="x", pady=(0, 14), ipady=4)
+            lbl_prev = ctk.CTkLabel(prev_frame, text="設定プレビュー: （未設定）", font=self.F(18, bold=True, mono=True), text_color=COLOR_NEON_CYAN)
+            lbl_prev.pack(pady=6)
 
-            def clear_ed():
-                captured_raw[0] = ""
-                dlg_state["mods"].clear()
-                dlg_state["main"] = ""
-                dlg_state["fresh"] = True
-                box.configure(text="（キーを押してください）", text_color=COLOR_TEXT_SUB)
+            lbl_warn = ctk.CTkLabel(p, text="", font=self.F(13), text_color=COLOR_PAUSE_ACTIVE)
+            lbl_warn.pack(anchor="w", pady=(0, 8))
 
-            def commit_ed():
-                if apply_hotkey_assignment(action_key, captured_raw[0], parent_win=ed):
+            def build_hotkey_string():
+                selected_val = KEY_LABEL_TO_VAL.get(opt_key.get(), "")
+                if not selected_val:
+                    return ""
+                mods = []
+                if cb_shift.get(): mods.append("Shift")
+                if cb_ctrl.get(): mods.append("Ctrl")
+                if cb_alt.get(): mods.append("Alt")
+                mods.append(selected_val)
+                return "+".join(mods)
+
+            def update_preview():
+                raw = build_hotkey_string()
+                if not raw:
+                    lbl_prev.configure(text="設定プレビュー: （未設定）", text_color=COLOR_TEXT_SUB)
+                    lbl_warn.configure(text="")
+                    return
+                _, _, canon = parse_hotkey_string(raw)
+                disp = canon or raw
+                lbl_prev.configure(text=f"設定プレビュー: {disp}", text_color=COLOR_PLAY_ACTIVE)
+
+                # 重複チェック
+                conflict_name = None
+                for other, v in current_hotkeys.items():
+                    if other != action_key and v and parse_hotkey_string(v)[2] == disp:
+                        conflict_name = HOTKEY_NAMES.get(other, other)
+                        break
+                if conflict_name:
+                    lbl_warn.configure(text=f"※「{conflict_name}」とキーが重複しています（保存時にそちらが解除されます）")
+                else:
+                    lbl_warn.configure(text="")
+
+            update_preview()
+
+            def commit_choice():
+                raw = build_hotkey_string()
+                if apply_hotkey_assignment(action_key, raw, parent_win=ed):
                     ed.destroy()
 
-            ed.bind("<KeyPress>", on_ed_key)
-            box.bind("<Button-1>", lambda e: clear_ed())
-            ed.after(50, ed.focus_force)
+            def clear_choice():
+                apply_hotkey_assignment(action_key, "", parent_win=ed)
+                ed.destroy()
 
+            # 操作ボタン列
             br = ctk.CTkFrame(p, fg_color="transparent")
             br.pack(side="bottom", fill="x")
-            self.btn(br, "決定", commit_ed, size=16, height=42, width=150, kind="play").pack(side="right", padx=(6, 0))
+            self.btn(br, "この設定にする", commit_choice, size=16, height=42, width=160, kind="play").pack(side="right", padx=(8, 0))
             self.btn(br, "キャンセル", ed.destroy, size=15, height=42, width=110).pack(side="right", padx=6)
-            self.btn(br, "クリア（解除）", clear_ed, size=15, height=42, width=130, kind="danger").pack(side="left")
+            self.btn(br, "割り当てを解除", clear_choice, size=15, height=42, width=140, kind="danger").pack(side="left")
 
         for i, (action_key, action_name) in enumerate(HOTKEY_NAMES.items()):
             row = ctk.CTkFrame(scroll, fg_color="#111C33" if i % 2 == 0 else "#0B1324", corner_radius=8)
@@ -2211,26 +2248,23 @@ class DictaApp(ctk.CTk):
             var = tk.StringVar(value=canon or "（未設定）")
             key_vars[action_key] = var
 
-            # クリックするとその場で直接キー入力できるボックスボタン
-            kb_btn = ctk.CTkButton(
-                row, textvariable=var, width=250, height=36, corner_radius=6,
-                fg_color="#091426", hover_color="#13284C", border_width=2, border_color=COLOR_BORDER_SUBTLE,
-                font=self.F(15, mono=True), text_color=COLOR_NEON_CYAN,
-                command=lambda ak=action_key: start_inline_capture(ak)
+            # 現在の設定キーを安定して美しく表示する枠
+            lbl_key = ctk.CTkLabel(
+                row, textvariable=var, width=240, height=36, corner_radius=6,
+                fg_color="#091426", text_color=COLOR_NEON_CYAN,
+                font=self.F(15, mono=True)
             )
-            kb_btn.pack(side="left", padx=6, pady=4)
-            key_btns[action_key] = kb_btn
+            lbl_key.pack(side="left", padx=6, pady=4)
 
             if action_key in fb_actions:
                 ctk.CTkLabel(row, text="[重複]", font=self.F(13), text_color=COLOR_PAUSE_ACTIVE).pack(side="left", padx=4)
 
-            self.btn(row, "解除", lambda ak=action_key: (stop_inline_capture(), apply_hotkey_assignment(ak, "")),
+            self.btn(row, "解除", lambda ak=action_key: apply_hotkey_assignment(ak, ""),
                      size=14, height=32, width=64, kind="danger", radius=6).pack(side="right", padx=(2, 6))
             self.btn(row, "変更", lambda ak=action_key: edit_key_dialog(ak),
                      size=14, height=32, width=70, kind="primary", radius=6).pack(side="right", padx=2)
 
         def reset_defaults():
-            stop_inline_capture()
             if messagebox.askyesno("確認", "ショートカットキーを初期設定（Shift+Ctrl+Alt+W/E/Q/Z/X/A など）に戻しますか？", parent=dlg):
                 current_hotkeys.clear()
                 current_hotkeys.update(DEFAULT_CONFIG["hotkeys"])
@@ -2290,11 +2324,50 @@ class DictaApp(ctk.CTk):
         c_beep = chk_row("区間リピートで折り返すときに通知音を鳴らす", self.config.get("loop_beep", False))
         c_max = chk_row("起動時に全画面（最大化）で表示する", self.config.get("start_maximized", True))
 
+        # --- Windows右クリック連携カード ---
+        sep = ctk.CTkFrame(pg, fg_color="#1E293B", height=2)
+        sep.pack(fill="x", pady=(14, 10))
+
+        reg_card = ctk.CTkFrame(pg, fg_color="#0A1426", corner_radius=12, border_width=1, border_color="#1E3A5F")
+        reg_card.pack(fill="x", pady=4, padx=2)
+
+        ctk.CTkLabel(reg_card, text="🖱  Windows 右クリック「プログラムから開く」連携", font=self.F(17), text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=14, pady=(10, 4))
+        ctk.CTkLabel(
+            reg_card,
+            text="音源ファイル（.mp3, .wav, .m4a, .aac, .flac, .wma, .ogg 等）を右クリックした際の「プログラムから開く」一覧に\nDicta を追加します。※既定のアプリ（デフォルトの音楽プレーヤー等）は一切変更されません。",
+            font=self.F(14, bold=False), text_color=COLOR_TEXT_SUB, justify="left"
+        ).pack(anchor="w", padx=14, pady=(0, 10))
+
+        reg_row = ctk.CTkFrame(reg_card, fg_color="transparent")
+        reg_row.pack(fill="x", padx=14, pady=(0, 12))
+
+        lbl_reg_status = ctk.CTkLabel(reg_row, text="", font=self.F(15, bold=True))
+        lbl_reg_status.pack(side="left", padx=(0, 16))
+
+        def refresh_reg_status():
+            if is_registered and is_registered():
+                lbl_reg_status.configure(text="● 現在の状態: 「プログラムから開く」に登録済み", text_color=COLOR_PLAY_ACTIVE)
+            else:
+                lbl_reg_status.configure(text="○ 現在の状態: 未登録（右クリック一覧には出ません）", text_color=COLOR_TEXT_SUB)
+
+        def do_register():
+            if register_open_with and register_open_with():
+                refresh_reg_status()
+                messagebox.showinfo("登録完了", "Windowsの「プログラムから開く」の選択肢一覧に Dicta を登録しました。\n（※既定のアプリは変更されていません）", parent=dlg)
+
+        def do_unregister():
+            if unregister_open_with and unregister_open_with():
+                refresh_reg_status()
+                messagebox.showinfo("解除完了", "Windowsの「プログラムから開く」から Dicta の登録を解除しました。", parent=dlg)
+
+        refresh_reg_status()
+        self.btn(reg_row, "登録を解除する", do_unregister, size=14, height=36, width=130, kind="danger").pack(side="right", padx=(6, 0))
+        self.btn(reg_row, "「プログラムから開く」に登録する", do_register, size=14, height=36, width=240, kind="primary").pack(side="right")
+
         # 初期表示タブをセット
         switch_tab("keys")
 
         def save_and_close():
-            stop_inline_capture()
             try:
                 self.config["auto_rewind_sec"] = max(0.0, float(e_rew.get()))
                 self.config["jump_rewind_sec"] = max(0.1, float(e_jr.get()))

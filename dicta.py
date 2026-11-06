@@ -1100,38 +1100,46 @@ class DictaApp(ctk.CTk):
     def _build_mini_mode(self):
         self.mini_container = ctk.CTkFrame(self, corner_radius=0, fg_color=COLOR_BG_MAIN)
         mt = ctk.CTkFrame(self.mini_container, fg_color="transparent")
-        mt.pack(fill="x", padx=14, pady=(8, 0))
-        ctk.CTkLabel(mt, text=f"Dicta {self.version_str}", font=self.F(16), text_color=COLOR_NEON_CYAN).pack(side="left", padx=(0, 10))
+        mt.pack(fill="x", padx=14, pady=(8, 2))
+
+        # 左側：大きな時間表示（クリック編集可能、バージョン表記は完全排除）
         self.mini_time_row = ctk.CTkFrame(mt, fg_color="transparent")
         self.mini_time_row.pack(side="left")
-        self.lbl_mini_time = ctk.CTkLabel(self.mini_time_row, text="00:00:00.0", font=self.F(38, mono=True), text_color=COLOR_NEON_CYAN)
+        self.lbl_mini_time = ctk.CTkLabel(self.mini_time_row, text="00:00:00.0", font=self.F(36, mono=True), text_color=COLOR_NEON_CYAN)
         self.lbl_mini_time.pack(side="left")
         self._make_time_label_editable(self.lbl_mini_time, "mini")
-        self.lbl_mini_speed = ctk.CTkLabel(mt, text="1.00倍", font=self.F(18, mono=True), text_color=COLOR_TEXT_MAIN)
-        self.lbl_mini_speed.pack(side="left", padx=12)
-        self.btn(mt, "通常画面に戻す", self.toggle_mini_mode, size=15, height=36, width=150, kind="primary", radius=8).pack(side="right")
+
+        # 速度表示と直感的な微調整ボタン
+        speed_box = ctk.CTkFrame(mt, fg_color="transparent")
+        speed_box.pack(side="left", padx=(18, 0))
+        self.btn(speed_box, "－", lambda: self.adjust_speed(-self.config.get("speed_step", 0.05)), size=14, height=30, width=32, radius=6).pack(side="left", padx=2)
+        self.lbl_mini_speed = ctk.CTkLabel(speed_box, text="1.00倍", font=self.F(16, mono=True), text_color=COLOR_TEXT_MAIN)
+        self.lbl_mini_speed.pack(side="left", padx=6)
+        self.btn(speed_box, "＋", lambda: self.adjust_speed(self.config.get("speed_step", 0.05)), size=14, height=30, width=32, radius=6).pack(side="left", padx=2)
+
+        # 右側：全画面に戻すボタン（文字が絶対に収まる十分なサイズ）
+        self.btn(mt, "🗖 全画面に戻す", self.toggle_mini_mode, size=15, height=38, width=170, kind="primary", radius=8).pack(side="right")
 
         self.mini_seekbar = MainSeekBar(
             self.mini_container, self.ui_scale, COLOR_BG_MAIN,
             on_seek=self.on_seekbar_seek,
             on_preview=self.on_seekbar_preview,
             on_bookmark_delete=self.action_bookmark_delete,
-            height=46
+            height=44
         )
-        self.mini_seekbar.pack(fill="x", padx=8)
+        self.mini_seekbar.pack(fill="x", padx=10, pady=(2, 4))
 
+        # 下段：必要最低限の操作に絞り込んだ快適ボタン列（文字欠けゼロ）
         mc = ctk.CTkFrame(self.mini_container, fg_color="transparent")
         mc.pack(fill="x", padx=14, pady=(0, 8))
-        self.btn_mini_rew = self.btn(mc, "◀◀ 戻る", self.action_rewind, size=16, height=42, kind="accent", radius=8)
+        self.btn_mini_rew = self.btn(mc, "◀◀ 戻る", self.action_rewind, size=16, height=44, kind="accent", radius=8)
         self.btn_mini_rew.pack(side="left", fill="x", expand=True, padx=3)
-        self.btn_mini_play = self.btn(mc, "▶ 再生", self.action_play_pause, size=18, height=42, kind="play", radius=8)
+        self.btn_mini_play = self.btn(mc, "▶ 再生", self.action_play_pause, size=18, height=44, kind="play", radius=8)
         self.btn_mini_play.pack(side="left", fill="x", expand=True, padx=3)
-        self.btn_mini_fwd = self.btn(mc, "▶▶ 進む", self.action_forward, size=16, height=42, kind="accent", radius=8)
+        self.btn_mini_fwd = self.btn(mc, "▶▶ 進む", self.action_forward, size=16, height=44, kind="accent", radius=8)
         self.btn_mini_fwd.pack(side="left", fill="x", expand=True, padx=3)
-        self.btn(mc, "遅く", lambda: self.adjust_speed(-self.config.get("speed_step", 0.05)), size=15, height=42, width=65, radius=8).pack(side="left", padx=2)
-        self.btn(mc, "速く", lambda: self.adjust_speed(self.config.get("speed_step", 0.05)), size=15, height=42, width=65, radius=8).pack(side="left", padx=2)
-        self.btn(mc, "しおり", self.action_bookmark_add, size=15, height=42, width=80, kind="sub_bm", radius=8).pack(side="left", padx=2)
-        self.btn(mc, "コピー", self.action_counter_copy, size=15, height=42, width=80, kind="primary", radius=8).pack(side="left", padx=2)
+        self.btn(mc, "🔖 しおり", self.action_bookmark_add, size=15, height=44, width=100, kind="sub_bm", radius=8).pack(side="left", padx=(6, 3))
+        self.btn(mc, "📋 時間コピー", self.action_counter_copy, size=15, height=44, width=125, kind="primary", radius=8).pack(side="left", padx=3)
 
     # -------------------------------------------------------------------------
     # Status line helper
@@ -1951,8 +1959,8 @@ class DictaApp(ctk.CTk):
             self.state("normal")
             self.main_container.pack_forget()
             self.mini_container.pack(fill="both", expand=True)
-            self.minsize(720, 180)
-            self.geometry("900x205")
+            self.minsize(760, 200)
+            self.geometry("940x220")
             self.attributes("-topmost", True)
         else:
             self.is_mini_mode = False

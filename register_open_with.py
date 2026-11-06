@@ -29,41 +29,6 @@ def get_paths():
         pythonw_exe = sys.executable
     return dicta_dir, dicta_py, ico_path, exe_path, pythonw_exe
 
-def create_desktop_shortcut():
-    """デスクトップに Dicta のショートカット (Dicta.lnk) を安全に作成する。"""
-    try:
-        dicta_dir, dicta_py, ico_path, exe_path, pythonw_exe = get_paths()
-        desktop = os.path.join(os.environ["USERPROFILE"], "Desktop")
-        shortcut_path = os.path.join(desktop, "Dicta.lnk")
-        target_exe = exe_path if os.path.exists(exe_path) else pythonw_exe
-        args = "" if os.path.exists(exe_path) else f'"{dicta_py}"'
-        
-        import subprocess
-        vbs_code = f'''Set ws = CreateObject("WScript.Shell")
-Set sc = ws.CreateShortcut("{shortcut_path}")
-sc.TargetPath = "{target_exe}"
-sc.Arguments = "{args}"
-sc.WorkingDirectory = "{dicta_dir}"
-sc.IconLocation = "{ico_path},0"
-sc.Description = "Dicta - 音声文字起こし再生スタジオ"
-sc.WindowStyle = 1
-sc.Save
-'''
-        vbs_file = os.path.join(dicta_dir, "_temp_lnk.vbs")
-        with open(vbs_file, "w", encoding="utf-16") as f:
-            f.write(vbs_code)
-        try:
-            subprocess.run(["cscript", "//nologo", vbs_file], check=True)
-        finally:
-            if os.path.exists(vbs_file):
-                os.remove(vbs_file)
-
-        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
-        return True
-    except Exception as e:
-        print(f"Error creating desktop shortcut: {e}")
-        return False
-
 def register_open_with():
     dicta_dir, dicta_py, ico_path, exe_path, pythonw_exe = get_paths()
     # Dicta.exe が存在すればそれを最優先（Windows Explorer のプログラムから開くに「Python」ではなく「Dicta」と美しく表示される）
@@ -104,9 +69,6 @@ def register_open_with():
             owl_path = rf"Software\Classes\{ext}\OpenWithList\Dicta.exe"
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, owl_path) as owl_key:
                 winreg.SetValueEx(owl_key, "", 0, winreg.REG_SZ, "")
-
-        # 6. デスクトップショートカットも作成/更新
-        create_desktop_shortcut()
 
         # シェルキャッシュ更新
         ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
@@ -168,11 +130,8 @@ if __name__ == "__main__":
         register_open_with()
     elif action in ("unregister", "unreg", "remove", "clean"):
         unregister_open_with()
-    elif action in ("shortcut", "lnk", "desktop"):
-        ok = create_desktop_shortcut()
-        print(f"Created desktop shortcut: {ok}")
     elif action in ("status", "check"):
         reg = is_registered()
         print(f"Registered in OpenWith: {reg}")
     else:
-        print("Usage: python register_open_with.py [register | unregister | shortcut | status]")
+        print("Usage: python register_open_with.py [register | unregister | status]")

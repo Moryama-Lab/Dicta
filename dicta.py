@@ -49,12 +49,11 @@ ScalingTracker.check_dpi_scaling = lambda *args, **kwargs: None
 from bass_engine import BassAudioEngine
 from hotkey_manager import HotkeyManager, parse_hotkey_string, VK_TO_NAME, VK_KEYS
 try:
-    from register_open_with import register_open_with, unregister_open_with, is_registered, create_desktop_shortcut
+    from register_open_with import register_open_with, unregister_open_with, is_registered
 except Exception:
     register_open_with = None
     unregister_open_with = None
     is_registered = lambda: False
-    create_desktop_shortcut = None
 
 user32 = ctypes.windll.user32
 
@@ -987,8 +986,16 @@ class DictaApp(ctk.CTk):
             file_box, text="音声ファイル未選択 — 右のボタン、またはドラッグ＆ドロップで開きます",
             anchor="w", font=self.F(19), text_color=COLOR_TEXT_MAIN)
         self.lbl_filename.pack(side="left", fill="x", expand=True, padx=16, pady=8)
-        self.btn(file_box, "ファイルを開く", self.open_file_dialog, size=17, height=44, width=200,
-                 kind="primary").pack(side="right", padx=10, pady=6)
+        self.btn_close_file = self.btn(
+            file_box, "✕ 閉じる", self.action_close_file, size=15, height=44, width=110,
+            kind="normal"
+        )
+        self.btn_close_file.pack(side="right", padx=(4, 12), pady=6)
+        self.btn_open_file = self.btn(
+            file_box, "ファイルを開く", self.open_file_dialog, size=17, height=44, width=180,
+            kind="primary"
+        )
+        self.btn_open_file.pack(side="right", padx=(4, 4), pady=6)
 
         # ---------- 3. Counter & Copy Box (時間コピー ＆ 区間コピー並び) ----------
         counter_box = self.card(mc, glow=True, bg=COLOR_BG_COUNTER)
@@ -1720,6 +1727,39 @@ class DictaApp(ctk.CTk):
         if os.path.exists(path):
             self.load_audio(path)
 
+    def action_close_file(self):
+        if not self.engine.current_file:
+            self.flash_status("音声ファイルは開かれていません", COLOR_TEXT_SUB, 1500)
+            return
+        self.engine.unload()
+        self.loop_a = None
+        self.loop_b = None
+        self.lbl_filename.configure(text="音声ファイル未選択 — 右のボタン、またはドラッグ＆ドロップで開きます")
+        self.lbl_time.configure(text="00:00:00.0")
+        self.lbl_duration.configure(text="/ 00:00:00")
+        if hasattr(self, "lbl_mini_filename"):
+            self.lbl_mini_filename.configure(text="未選択")
+        if hasattr(self, "lbl_mini_time"):
+            self.lbl_mini_time.configure(text="00:00:00")
+        if hasattr(self, "lbl_mini_dur"):
+            self.lbl_mini_dur.configure(text="/ 00:00:00")
+        self.seekbar.set_duration(0.0)
+        self.seekbar.set_position(0.0)
+        self.mini_seekbar.set_duration(0.0)
+        self.mini_seekbar.set_position(0.0)
+        self.update_seek_markers()
+        self.set_play_buttons(False)
+        self.set_status("● 待機中", COLOR_TEXT_SUB)
+        self.update_loop_ui()
+        self.refresh_bookmarks_ui()
+        self.spec_history.clear()
+        self.peak_hold = [0.0] * 44
+        self._analyzer_idle_drawn = False
+        self.config["last_file"] = ""
+        self.config["last_position"] = 0.0
+        self.save_config()
+        self.flash_status("音声ファイルを閉じました（選択解除）", COLOR_TEXT_SUB, 2000)
+
     def open_file_dialog(self):
         filetypes = [
             ("音声ファイル（すべて）", "*.mp3 *.wav *.m4a *.aac *.flac *.wma *.ogg"),
@@ -1982,11 +2022,13 @@ class DictaApp(ctk.CTk):
         card = ctk.CTkFrame(dlg, fg_color=COLOR_BG_MAIN, corner_radius=16, border_width=2, border_color=border_c)
         card.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # アイコン ＋ 見出し
+        # アイコン ＋ 見出し（一体化してベースライン・高さを100%統一し、絶妙な間隔で左寄せ）
         hdr = ctk.CTkFrame(card, fg_color="transparent")
         hdr.pack(fill="x", padx=36, pady=(26, 12))
-        ctk.CTkLabel(hdr, text=icon, font=self.F(36)).pack(side="left", padx=(0, 16))
-        ctk.CTkLabel(hdr, text=heading, font=self.F(24, bold=True), text_color=COLOR_TEXT_MAIN).pack(side="left")
+        ctk.CTkLabel(
+            hdr, text=f"{icon}  {heading}", font=self.F(24, bold=True),
+            text_color=COLOR_TEXT_MAIN, anchor="w"
+        ).pack(side="left")
 
         # ボタン列を先に下部にパック（文字とボタンの重なり・文字切れを物理的に完全防止）
         btn_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -2297,8 +2339,8 @@ class DictaApp(ctk.CTk):
 
         dlg = ctk.CTkToplevel(self)
         dlg.title(f"Dicta {self.version_str} — 設定・キー設定")
-        dlg.geometry("980x840")
-        dlg.minsize(860, 700)
+        dlg.geometry("1040x860")
+        dlg.minsize(920, 720)
         dlg.configure(fg_color=COLOR_BG_MAIN)
         dlg.transient(self)
         dlg.grab_set()
@@ -2355,6 +2397,9 @@ class DictaApp(ctk.CTk):
             height=52, corner_radius=10, font=self.F(20)
         )
         btn_tab_gen.grid(row=0, column=1, sticky="ew", padx=6, pady=6)
+
+        # 初期表示で確実に「キー設定」タブを開く
+        switch_tab("keys")
 
         # --- キー選択肢リスト（誰でも確実に選べるドロップダウン用） ---
         KEY_CHOICES = [
@@ -2568,26 +2613,29 @@ class DictaApp(ctk.CTk):
         for i, (action_key, action_name) in enumerate(HOTKEY_NAMES.items()):
             row = ctk.CTkFrame(scroll, fg_color="#111C33" if i % 2 == 0 else "#0B1324", corner_radius=8)
             row.pack(fill="x", pady=2, padx=4)
-            ctk.CTkLabel(row, text=action_name, width=310, anchor="w", font=self.F(16)).pack(side="left", padx=10, pady=6)
+            ctk.CTkLabel(row, text=action_name, width=250, anchor="w", font=self.F(16)).pack(side="left", padx=12, pady=6)
             _, _, canon = parse_hotkey_string(current_hotkeys.get(action_key, ""))
             var = tk.StringVar(value=canon or "（未設定）")
             key_vars[action_key] = var
 
             # 現在の設定キーを安定して美しく表示する枠
             lbl_key = ctk.CTkLabel(
-                row, textvariable=var, width=240, height=36, corner_radius=6,
+                row, textvariable=var, width=280, height=36, corner_radius=6,
                 fg_color="#091426", text_color=COLOR_NEON_CYAN,
                 font=self.F(15, mono=True)
             )
-            lbl_key.pack(side="left", padx=6, pady=4)
+            lbl_key.pack(side="left", padx=8, pady=4)
 
             if action_key in fb_actions:
                 ctk.CTkLabel(row, text="[重複]", font=self.F(13), text_color=COLOR_PAUSE_ACTIVE).pack(side="left", padx=4)
 
-            self.btn(row, "解除", lambda ak=action_key: apply_hotkey_assignment(ak, ""),
-                     size=14, height=32, width=64, kind="danger", radius=6).pack(side="right", padx=(2, 6))
-            self.btn(row, "変更", lambda ak=action_key: edit_key_dialog(ak),
-                     size=14, height=32, width=70, kind="primary", radius=6).pack(side="right", padx=2)
+            # 操作ボタンを独立コンテナ内に横並びパック（重なりを物理的に100%防止）
+            btn_box = ctk.CTkFrame(row, fg_color="transparent")
+            btn_box.pack(side="right", padx=(4, 10), pady=4)
+            self.btn(btn_box, "変更", lambda ak=action_key: edit_key_dialog(ak),
+                     size=14, height=34, width=78, kind="primary", radius=6).pack(side="left", padx=(0, 6))
+            self.btn(btn_box, "解除", lambda ak=action_key: apply_hotkey_assignment(ak, ""),
+                     size=14, height=34, width=72, kind="danger", radius=6).pack(side="left")
 
         def reset_defaults():
             if messagebox.askyesno("確認", "ショートカットキーを初期設定（Shift+Ctrl+Alt+W/E/Q/Z/X/A など）に戻しますか？", parent=dlg):
@@ -2619,7 +2667,7 @@ class DictaApp(ctk.CTk):
 
         rf = ctk.CTkFrame(pg, fg_color="transparent")
         rf.pack(fill="x", pady=6)
-        ctk.CTkLabel(rf, text="時間コピーの書式", width=320, anchor="w", font=self.F(16)).pack(side="left")
+        ctk.CTkLabel(rf, text="時間コピーの書式", width=250, anchor="w", font=self.F(16)).pack(side="left")
         cur_fmt = self.config.get("counter_format", "{time}")
         fmt_label = next((k for k, v in COUNTER_FORMATS.items() if v == cur_fmt), list(COUNTER_FORMATS)[0])
         opt_fmt = ctk.CTkOptionMenu(rf, values=list(COUNTER_FORMATS.keys()), width=230, height=36, font=self.F(15),
@@ -2629,8 +2677,8 @@ class DictaApp(ctk.CTk):
 
         rp = ctk.CTkFrame(pg, fg_color="transparent")
         rp.pack(fill="x", pady=6)
-        ctk.CTkLabel(rp, text="時間コピーの細かさ", width=320, anchor="w", font=self.F(16)).pack(side="left")
-        seg_p = ctk.CTkSegmentedButton(rp, values=["秒まで（01:24:18）", "ミリ秒まで（01:24:18,492）"], font=self.F(15), height=36,
+        ctk.CTkLabel(rp, text="時間コピーの細かさ", width=250, anchor="w", font=self.F(16)).pack(side="left")
+        seg_p = ctk.CTkSegmentedButton(rp, values=["秒まで（01:24:18）", "ミリ秒まで（01:24:18,492）"], font=self.F(14), height=38, width=440,
                                        selected_color=COLOR_CYAN_MID, unselected_color=COLOR_BG_BUTTON)
         seg_p.pack(side="left", padx=8)
         seg_p.set("ミリ秒まで（01:24:18,492）" if self.config.get("counter_precision") == "ms" else "秒まで（01:24:18）")
@@ -2686,36 +2734,10 @@ class DictaApp(ctk.CTk):
                 messagebox.showinfo("解除完了", "Windowsの「プログラムから開く」から Dicta の登録を解除しました。", parent=dlg)
 
         refresh_reg_status()
-        self.btn(reg_row, "登録を解除する", do_unregister, size=14, height=36, width=130, kind="danger").pack(side="right", padx=(6, 0))
-        self.btn(reg_row, "「プログラムから開く」に登録する", do_register, size=14, height=36, width=240, kind="primary").pack(side="right")
-
-        # --- デスクトップショートカット作成カード ---
-        sep2 = ctk.CTkFrame(pg, fg_color="#1E293B", height=2)
-        sep2.pack(fill="x", pady=(14, 10))
-
-        sc_card = ctk.CTkFrame(pg, fg_color="#0A1426", corner_radius=12, border_width=1, border_color="#1E3A5F")
-        sc_card.pack(fill="x", pady=4, padx=2)
-
-        ctk.CTkLabel(sc_card, text="🖥  デスクトップ ショートカット作成", font=self.F(17), text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=14, pady=(10, 4))
-        ctk.CTkLabel(
-            sc_card,
-            text="デスクトップに Dicta のアイコン付きショートカット（Dicta.lnk）を作成します。\n次回からデスクトップのアイコンからワンクリックですぐに起動できるようになります。",
-            font=self.F(14, bold=False), text_color=COLOR_TEXT_SUB, justify="left"
-        ).pack(anchor="w", padx=14, pady=(0, 10))
-
-        sc_row = ctk.CTkFrame(sc_card, fg_color="transparent")
-        sc_row.pack(fill="x", padx=14, pady=(0, 12))
-
-        def do_create_sc():
-            if create_desktop_shortcut and create_desktop_shortcut():
-                messagebox.showinfo("作成完了", "デスクトップに「Dicta」のショートカットを作成しました！", parent=dlg)
-            else:
-                messagebox.showerror("エラー", "ショートカットの作成に失敗しました。", parent=dlg)
-
-        self.btn(sc_row, "🖥️ デスクトップにショートカットを作成する", do_create_sc, size=14, height=36, width=280, kind="cyan").pack(side="right")
-
-        # 初期表示タブをセット
-        switch_tab("keys")
+        reg_btn_box = ctk.CTkFrame(reg_row, fg_color="transparent")
+        reg_btn_box.pack(side="right")
+        self.btn(reg_btn_box, "「プログラムから開く」に登録する", do_register, size=14, height=38, width=300, kind="primary").pack(side="left", padx=(0, 8))
+        self.btn(reg_btn_box, "登録を解除する", do_unregister, size=14, height=38, width=140, kind="danger").pack(side="left")
 
         def save_and_close():
             try:

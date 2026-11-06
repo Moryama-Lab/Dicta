@@ -410,6 +410,21 @@ class BassAudioEngine:
             self.set_position_seconds(0.0)
             return res
 
+    def unload(self):
+        with self._lock:
+            self.stop()
+            if self.tempo_stream:
+                self.bass.BASS_StreamFree(self.tempo_stream)
+                self.tempo_stream = 0
+                self.eq_fx_handle = 0
+                self.isolator_fx1 = 0
+                self.isolator_fx2 = 0
+            self.current_file = None
+            self.active_local_path = None
+            self.duration_seconds = 0.0
+            self.is_cached_copy = False
+            return True
+
     def is_playing(self):
         with self._lock:
             if not self.tempo_stream:

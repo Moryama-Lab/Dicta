@@ -371,7 +371,8 @@ class MainSeekBar(tk.Canvas):
         self.it_tip_bg = self.create_rectangle(0, 0, 0, 0, fill="#081426", outline=COLOR_NEON_CYAN, state="hidden")
         self.it_tip = self.create_text(0, 0, text="", fill="#FFFFFF", font=self.font_tip, state="hidden")
 
-        self.bind("<Configure>", lambda e: self._layout())
+        self._last_cfg_w = 0
+        self.bind("<Configure>", self._on_configure)
         self.bind("<ButtonPress-1>", self._on_press)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
@@ -379,6 +380,11 @@ class MainSeekBar(tk.Canvas):
         self.bind("<Motion>", self._on_motion)
         self.bind("<Leave>", self._on_leave)
         self.bind("<MouseWheel>", self._on_wheel)
+
+    def _on_configure(self, e):
+        if abs(e.width - self._last_cfg_w) >= 2:
+            self._last_cfg_w = e.width
+            self._layout()
 
     def _usable(self):
         w = max(2 * self.pad + 10, self.winfo_width())
@@ -578,7 +584,12 @@ class DictaApp(ctk.CTk):
 
         # ウィンドウ左上（タイトルバー）：バージョンとコミット情報のみ（文字起こし再生スタジオは不要）
         self.title(f"Dicta {self.version_str}")
-        self.geometry("1380x950")
+        sw = max(1380, self.winfo_screenwidth())
+        sh = max(860, self.winfo_screenheight() - 48)
+        if self.config.get("start_maximized", True):
+            self.geometry(f"{sw}x{sh}+0+0")
+        else:
+            self.geometry("1380x950")
         self.minsize(1080, 760)
 
         if os.path.exists(ICON_FILE):
@@ -635,13 +646,6 @@ class DictaApp(ctk.CTk):
         # UIの構築
         self.init_ui()
 
-        # 最大化表示
-        if self.config.get("start_maximized", True):
-            try:
-                self.state("zoomed")
-            except Exception:
-                pass
-
         self.apply_always_on_top()
         self.apply_eq_gains(self.config.get("eq_gains", [-4.0, -1.0, 2.0, 6.0, 3.0, -2.0]))
         self.set_speed(self.config.get("speed", 1.0))
@@ -662,6 +666,19 @@ class DictaApp(ctk.CTk):
             last_f = self.config.get("last_file")
             if os.path.exists(last_f):
                 self.after(150, lambda: self.resume_file(last_f, self.config.get("last_position", 0.0)))
+
+        # CustomTkinterのmainloop()突入時の二重withdraw/deiconifyによる「最大化解除＆カクつき」を完全回避し、
+        # 最初から直接最大化（zoomed）状態でスムーズに一発表示する
+        try:
+            self._windows_set_titlebar_color(self._get_appearance_mode())
+            self._window_exists = True
+            self.update_idletasks()
+            if self.config.get("start_maximized", True):
+                self.state("zoomed")
+            else:
+                self.deiconify()
+        except Exception:
+            self.deiconify()
 
     # -------------------------------------------------------------------------
     # Style helpers
@@ -684,8 +701,8 @@ class DictaApp(ctk.CTk):
         "primary": dict(fg_color=COLOR_CYAN_MID, hover_color=COLOR_CYAN_DARK, border_color=COLOR_NEON_CYAN, text_color=COLOR_TEXT_MAIN),
         "danger": dict(fg_color="#5C1D2B", hover_color="#7F263A", border_color="#F43F5E", text_color=COLOR_TEXT_MAIN),
         "play": dict(fg_color=COLOR_PLAY_ACTIVE, hover_color="#00B87A", border_color="#FFFFFF", text_color=COLOR_TEXT_DARK),
-        # サブ操作ボタン（均一サイズ・明快な色の区別）
-        "sub_head": dict(fg_color="#182338", hover_color="#243452", border_color="#47608A", text_color="#E2EDF8"),
+        # 最初から・しおり操作ボタン（明快な色の区別）
+        "sub_head": dict(fg_color="#26184A", hover_color="#3B2570", border_color="#A855F7", text_color="#F3E8FF"),
         "sub_bm": dict(fg_color="#2A2006", hover_color="#423208", border_color="#FFB300", text_color="#FDE047"),
         "sub_del": dict(fg_color="#2A1018", hover_color="#401824", border_color="#E11D48", text_color="#FDA4AF"),
     }
@@ -844,24 +861,29 @@ class DictaApp(ctk.CTk):
         ctrl = ctk.CTkFrame(transport_box, fg_color="transparent")
         ctrl.pack(fill="x", padx=14, pady=(4, 10))
 
-        # メイン再生グループ
-        self.btn_rewind = self.btn(ctrl, "◀◀ 戻る", self.action_rewind, size=18, height=46, kind="accent", radius=10)
-        self.btn_rewind.pack(side="left", fill="x", expand=True, padx=4)
+        # メイン再生グループ（一番左に「最初から」を配置し、「5秒戻る・再生・5秒進む」と完全に同一サイズで統一）
+        main_grp = ctk.CTkFrame(ctrl, fg_color="transparent")
+        main_grp.pack(side="left", fill="x", expand=True)
+        for col_idx in range(4):
+            main_grp.grid_columnconfigure(col_idx, weight=1, uniform="main_transport")
 
-        self.btn_play = self.btn(ctrl, "▶ 再生", self.action_play_pause, size=21, height=48, kind="play", radius=10)
-        self.btn_play.pack(side="left", fill="x", expand=True, padx=6)
+        self.btn_stop = self.btn(main_grp, "⏮ 最初から", self.action_stop, size=18, height=48, kind="sub_head", radius=10)
+        self.btn_stop.grid(row=0, column=0, sticky="ew", padx=4)
 
-        self.btn_forward = self.btn(ctrl, "▶▶ 進む", self.action_forward, size=18, height=46, kind="accent", radius=10)
-        self.btn_forward.pack(side="left", fill="x", expand=True, padx=4)
+        self.btn_rewind = self.btn(main_grp, "◀◀ 5秒戻る", self.action_rewind, size=18, height=48, kind="accent", radius=10)
+        self.btn_rewind.grid(row=0, column=1, sticky="ew", padx=4)
 
-        # サブ操作グループ（幅135px・高さ46px均一、色で明確に区別）
-        self.btn_stop = self.btn(ctrl, "最初から", self.action_stop, size=16, height=46, width=135, kind="sub_head", radius=10)
-        self.btn_stop.pack(side="left", padx=(12, 4))
+        self.btn_play = self.btn(main_grp, "▶ 再生", self.action_play_pause, size=20, height=48, kind="play", radius=10)
+        self.btn_play.grid(row=0, column=2, sticky="ew", padx=4)
 
-        self.btn_bm_add = self.btn(ctrl, "しおり追加", self.action_bookmark_add, size=16, height=46, width=135, kind="sub_bm", radius=10)
-        self.btn_bm_add.pack(side="left", padx=4)
+        self.btn_forward = self.btn(main_grp, "▶▶ 5秒進む", self.action_forward, size=18, height=48, kind="accent", radius=10)
+        self.btn_forward.grid(row=0, column=3, sticky="ew", padx=4)
 
-        self.btn_bm_clear = self.btn(ctrl, "しおり全消去", self.action_bookmark_clear_all, size=15, height=46, width=135, kind="sub_del", radius=10)
+        # しおり操作グループ（右側に配置、高さ48px均一）
+        self.btn_bm_add = self.btn(ctrl, "しおり追加", self.action_bookmark_add, size=16, height=48, width=135, kind="sub_bm", radius=10)
+        self.btn_bm_add.pack(side="left", padx=(14, 4))
+
+        self.btn_bm_clear = self.btn(ctrl, "しおり全消去", self.action_bookmark_clear_all, size=15, height=48, width=135, kind="sub_del", radius=10)
         self.btn_bm_clear.pack(side="left", padx=4)
 
         self.refresh_jump_labels()
@@ -906,7 +928,6 @@ class DictaApp(ctk.CTk):
 
         self.lbl_iso_status = ctk.CTkLabel(iso, text="", font=self.F(16), text_color=COLOR_TEXT_SUB, anchor="w", justify="left")
         self.lbl_iso_status.pack(fill="x", padx=12, pady=(6, 2))
-        iso.bind("<Configure>", lambda e: self.lbl_iso_status.configure(wraplength=max(200, int(e.width / self.ui_scale) - 30)))
 
         grid = ctk.CTkFrame(iso, fg_color="transparent")
         grid.pack(fill="x", padx=8, pady=2)
@@ -1494,7 +1515,7 @@ class DictaApp(ctk.CTk):
             else:
                 b.configure(text=f"{name}点", font=self.F(16))
                 self.set_btn_kind(b, "normal")
-        self.btn_stop.configure(text="A点から" if self.loop_a is not None else "最初から")
+        self.btn_stop.configure(text="⏮ A点から" if self.loop_a is not None else "⏮ 最初から")
         self.update_seek_markers()
 
     # -------------------------------------------------------------------------

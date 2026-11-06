@@ -109,10 +109,14 @@ dicta/
 - **区間リピート（A-B Loop）の視覚化**:
   - A点からB点までの間を、鮮やかなレッド（`#FF3355`）の帯および境界線としてシークバー内にオーバーレイ描画。
 
-### 4.3 ウィンドウライフサイクルと安定起動
-- **初期化シーケンス**:
-  - ウィンドウは標準のジオメトリで作成後、ユーザー設定（`start_maximized: true`）に応じて `self.state("zoomed")` を安全に呼び出し。
-  - Tkinterの内部ウィンドウハンドル不整合を防ぐため、安易な `withdraw()` / `deiconify()` の非同期連打を排除し、初速かつ確実にOSのデスクトップ上にアクティブウィンドウとして展開されるよう最適化。
+### 4.3 ウィンドウライフサイクルとゼロラグ全画面（最大化）起動
+- **CustomTkinter内部 `mainloop()` の二重描画・最大化解除バグのバイパス**:
+  - `customtkinter.CTk` の標準実装（`ctk_tk.py`）では、`mainloop()` 突入時に `if not self._window_exists:` 分岐に入り、`_windows_set_titlebar_color()` 内で強制的に `withdraw()` ➔ `update()` ➔ `deiconify()`（`"normal"` 状態への復帰）を実行する仕様となっている。そのため、`__init__` 内で単純に `self.state("zoomed")` を呼ぶだけでは `mainloop()` 開始直後に通常ウィンドウへ引き戻され、2段階描画によるカクつきが発生する。
+  - Dicta では、`__init__` の末尾にてダークタイトルバー属性（`DwmSetWindowAttribute`）を適用した上で `self._window_exists = True` を先行セットし、`self.update_idletasks()` 後に直接 `self.state("zoomed")` を呼び出す。これにより、`mainloop()` 突入時の冗長な再非表示・通常復帰を100%バイパスし、最初から画面全体（最大化状態）のままカクつきゼロで一発表示される。
+- **リサイズ時のレイアウトスラッシング防止**:
+  - `<Configure>` イベント内での動的 `CTkLabel.configure(wraplength=...)` 呼び出しによる親フレームへの再帰的リサイズ連鎖（Layout Thrashing）を排除し、シークバーの `<Configure>` も横幅変化量が閾値（2px）以上のときのみ再計算を行うデバウンス処理を導入。
+- **トランスポート操作ボタンの均一グリッド設計**:
+  - メイン操作列の左側に配置された4つの主要ボタン（`⏮ 最初から`, `◀◀ 5秒戻る`, `▶ 再生`, `▶▶ 5秒進む`）は `grid_columnconfigure(..., weight=1, uniform="main_transport")` によって1ピクセルの狂いもなく同一サイズ（高さ48px・均等幅）に統一され、かつ機能ごとにカラーコード（ロイヤルバイオレット／ネオンシアン枠／エメラルドグリーン）が明確に分離されている。
 
 ---
 

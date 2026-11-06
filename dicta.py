@@ -701,8 +701,8 @@ class DictaApp(ctk.CTk):
         "primary": dict(fg_color=COLOR_CYAN_MID, hover_color=COLOR_CYAN_DARK, border_color=COLOR_NEON_CYAN, text_color=COLOR_TEXT_MAIN),
         "danger": dict(fg_color="#5C1D2B", hover_color="#7F263A", border_color="#F43F5E", text_color=COLOR_TEXT_MAIN),
         "play": dict(fg_color=COLOR_PLAY_ACTIVE, hover_color="#00B87A", border_color="#FFFFFF", text_color=COLOR_TEXT_DARK),
-        # 最初から・しおり操作ボタン（明快な色の区別）
-        "sub_head": dict(fg_color="#26184A", hover_color="#3B2570", border_color="#A855F7", text_color="#F3E8FF"),
+        # 最初から・しおり操作ボタン（目立ちすぎず品のあるスレートパープル ＆ 明快な色の区別）
+        "sub_head": dict(fg_color="#181526", hover_color="#28203B", border_color="#5E4E7A", text_color="#D8CEE8"),
         "sub_bm": dict(fg_color="#2A2006", hover_color="#423208", border_color="#FFB300", text_color="#FDE047"),
         "sub_del": dict(fg_color="#2A1018", hover_color="#401824", border_color="#E11D48", text_color="#FDA4AF"),
     }
@@ -817,20 +817,26 @@ class DictaApp(ctk.CTk):
 
         self.time_nums_row = ctk.CTkFrame(tcol, fg_color="transparent")
         self.time_nums_row.pack(anchor="w")
-        self.lbl_time = ctk.CTkLabel(self.time_nums_row, text="00:00:00.0", font=self.F(74, mono=True), text_color=COLOR_NEON_CYAN)
-        self.lbl_time.pack(side="left")
+
+        # 時間表示の枠サイズを固定（編集時にも一切枠が拡大・カクつかないコンテナ）
+        self.time_cell = ctk.CTkFrame(self.time_nums_row, fg_color="transparent", width=460, height=84)
+        self.time_cell.pack(side="left")
+        self.time_cell.pack_propagate(False)
+
+        self.lbl_time = ctk.CTkLabel(self.time_cell, text="00:00:00.0", font=self.F(74, mono=True), text_color=COLOR_NEON_CYAN)
+        self.lbl_time.pack(fill="both", expand=True)
         self.lbl_duration = ctk.CTkLabel(self.time_nums_row, text="/ 00:00:00", font=self.F(30, mono=True), text_color=COLOR_TEXT_SUB)
         self.lbl_duration.pack(side="left", padx=14, pady=(24, 0))
         self._make_time_label_editable(self.lbl_time, "main")
 
-        # 時間コピー（左） ＆ 区間コピー（右隣）
+        # 時間コピー（左） ＆ 区間コピー（右隣）— どちらも常に選択状態に見えないよう落ち着いたaccentスタイルで統一
         acol = ctk.CTkFrame(ci, fg_color="transparent")
         acol.pack(side="right", pady=4)
 
         copy_row = ctk.CTkFrame(acol, fg_color="transparent")
         copy_row.pack(fill="x", pady=(0, 6))
 
-        self.btn_copy = self.btn(copy_row, "📋 時間コピー", self.action_counter_copy, size=17, height=48, width=155, kind="primary")
+        self.btn_copy = self.btn(copy_row, "📋 時間コピー", self.action_counter_copy, size=17, height=48, width=155, kind="accent")
         self.btn_copy.pack(side="left", padx=(0, 6))
 
         self.btn_copy_range = self.btn(copy_row, "⏱ 区間コピー", self.action_range_copy, size=17, height=48, width=155, kind="accent")
@@ -861,27 +867,28 @@ class DictaApp(ctk.CTk):
         ctrl = ctk.CTkFrame(transport_box, fg_color="transparent")
         ctrl.pack(fill="x", padx=14, pady=(4, 10))
 
-        # メイン再生グループ（一番左に「最初から」を配置し、「5秒戻る・再生・5秒進む」と完全に同一サイズで統一）
+        # 一番左に「最初から」を控えめなサイズ（幅135px）で配置
+        self.btn_stop = self.btn(ctrl, "⏮ 最初から", self.action_stop, size=16, height=48, width=135, kind="sub_head", radius=10)
+        self.btn_stop.pack(side="left", padx=(4, 8))
+
+        # メイン再生3グループ（「5秒戻る・再生・5秒進む」は大きく均等に展開）
         main_grp = ctk.CTkFrame(ctrl, fg_color="transparent")
         main_grp.pack(side="left", fill="x", expand=True)
-        for col_idx in range(4):
+        for col_idx in range(3):
             main_grp.grid_columnconfigure(col_idx, weight=1, uniform="main_transport")
 
-        self.btn_stop = self.btn(main_grp, "⏮ 最初から", self.action_stop, size=18, height=48, kind="sub_head", radius=10)
-        self.btn_stop.grid(row=0, column=0, sticky="ew", padx=4)
-
         self.btn_rewind = self.btn(main_grp, "◀◀ 5秒戻る", self.action_rewind, size=18, height=48, kind="accent", radius=10)
-        self.btn_rewind.grid(row=0, column=1, sticky="ew", padx=4)
+        self.btn_rewind.grid(row=0, column=0, sticky="ew", padx=4)
 
         self.btn_play = self.btn(main_grp, "▶ 再生", self.action_play_pause, size=20, height=48, kind="play", radius=10)
-        self.btn_play.grid(row=0, column=2, sticky="ew", padx=4)
+        self.btn_play.grid(row=0, column=1, sticky="ew", padx=4)
 
         self.btn_forward = self.btn(main_grp, "▶▶ 5秒進む", self.action_forward, size=18, height=48, kind="accent", radius=10)
-        self.btn_forward.grid(row=0, column=3, sticky="ew", padx=4)
+        self.btn_forward.grid(row=0, column=2, sticky="ew", padx=4)
 
-        # しおり操作グループ（右側に配置、高さ48px均一）
+        # しおり操作グループ（右側に配置、幅135px・高さ48px均一）
         self.btn_bm_add = self.btn(ctrl, "しおり追加", self.action_bookmark_add, size=16, height=48, width=135, kind="sub_bm", radius=10)
-        self.btn_bm_add.pack(side="left", padx=(14, 4))
+        self.btn_bm_add.pack(side="left", padx=(12, 4))
 
         self.btn_bm_clear = self.btn(ctrl, "しおり全消去", self.action_bookmark_clear_all, size=15, height=48, width=135, kind="sub_del", radius=10)
         self.btn_bm_clear.pack(side="left", padx=4)
@@ -1141,16 +1148,16 @@ class DictaApp(ctk.CTk):
             return
         self.editing_time = which
         if which == "main":
-            label, row, size, before = self.lbl_time, self.time_nums_row, 62, self.lbl_duration
+            self.lbl_time.pack_forget()
+            ent = ctk.CTkEntry(self.time_cell, font=self.F(58, mono=True), height=76,
+                               justify="center", fg_color="#0B1A2E", border_color=COLOR_ISOLATOR_ON, border_width=3,
+                               text_color=COLOR_NEON_CYAN)
+            ent.pack(fill="both", expand=True, padx=4, pady=4)
         else:
-            label, row, size, before = self.lbl_mini_time, self.mini_time_row, 32, None
-        label.pack_forget()
-        ent = ctk.CTkEntry(row, font=self.F(size, mono=True), width=int(size * 6.4), height=int(size * 1.45),
-                           justify="center", fg_color="#0B1A2E", border_color=COLOR_ISOLATOR_ON, border_width=3,
-                           text_color=COLOR_NEON_CYAN)
-        if before is not None:
-            ent.pack(side="left", before=before)
-        else:
+            self.lbl_mini_time.pack_forget()
+            ent = ctk.CTkEntry(self.mini_time_row, font=self.F(30, mono=True), width=200, height=42,
+                               justify="center", fg_color="#0B1A2E", border_color=COLOR_ISOLATOR_ON, border_width=2,
+                               text_color=COLOR_NEON_CYAN)
             ent.pack(side="left")
         ent.insert(0, format_time(self.engine.get_position_seconds(), include_ms=False))
         ent.select_range(0, "end")
@@ -1158,26 +1165,48 @@ class DictaApp(ctk.CTk):
         ent.focus_set()
         self._time_entry = ent
         if which == "main":
-            self.flash_status("時間を入力して Enter（例: 1:24:18 ／ 012418 ／ 1:24:04,492） Escで取消", COLOR_ISOLATOR_ON, 15000)
+            self.flash_status("時間を入力して Enter（例: 1:24:18 ／ 012418） Escまたは画面クリックで取消", COLOR_ISOLATOR_ON, 15000)
         ent.bind("<Return>", lambda e: self.end_time_edit(commit=True))
         ent.bind("<KP_Enter>", lambda e: self.end_time_edit(commit=True))
         ent.bind("<Escape>", lambda e: self.end_time_edit(commit=False))
-        ent.bind("<FocusOut>", lambda e: self.after(120, lambda: self.end_time_edit(commit=False)))
+
+        # 数字の編集部分以外の画面上のどこをクリックしてもキャンセル
+        self._global_cancel_bind_id = self.bind_all("<Button-1>", self._on_global_click_during_edit, add=True)
+
+    def _on_global_click_during_edit(self, event):
+        if not self.editing_time or not self._time_entry:
+            return
+        w = event.widget
+        try:
+            ent_w = self._time_entry._entry if hasattr(self._time_entry, "_entry") else self._time_entry
+            if w == ent_w or str(w).startswith(str(self._time_entry)):
+                return
+        except Exception:
+            pass
+        self.after(10, lambda: self.end_time_edit(commit=False))
 
     def end_time_edit(self, commit):
+        if getattr(self, "_global_cancel_bind_id", None):
+            try:
+                self.unbind_all("<Button-1>")
+            except Exception:
+                pass
+            self._global_cancel_bind_id = None
+
         which = self.editing_time
         if not which:
             return
         ent = self._time_entry
-        text = ent.get()
+        text = ent.get() if ent else ""
         self.editing_time = None
         self._time_entry = None
         try:
-            ent.destroy()
+            if ent:
+                ent.destroy()
         except Exception:
             pass
         if which == "main":
-            self.lbl_time.pack(side="left", before=self.lbl_duration)
+            self.lbl_time.pack(fill="both", expand=True)
         else:
             self.lbl_mini_time.pack(side="left")
         if commit:
@@ -1454,8 +1483,10 @@ class DictaApp(ctk.CTk):
         self.btn_copy.configure(text="✓ コピー完了！", fg_color=COLOR_PLAY_ACTIVE, text_color=COLOR_TEXT_DARK)
         if getattr(self, "_copy_restore_job", None):
             self.after_cancel(self._copy_restore_job)
-        self._copy_restore_job = self.after(1200, lambda: self.btn_copy.configure(
-            text="📋 時間コピー", fg_color=COLOR_CYAN_MID, text_color=COLOR_TEXT_MAIN))
+        def _restore_copy_btn():
+            self.set_btn_kind(self.btn_copy, "accent")
+            self.btn_copy.configure(text="📋 時間コピー")
+        self._copy_restore_job = self.after(1200, _restore_copy_btn)
         self.flash_status(f"時間コピー: {tag}", COLOR_PLAY_ACTIVE, 1800)
 
     def action_range_copy(self):
@@ -1485,8 +1516,10 @@ class DictaApp(ctk.CTk):
         self.btn_copy_range.configure(text="✓ コピー完了！", fg_color=COLOR_PLAY_ACTIVE, text_color=COLOR_TEXT_DARK)
         if getattr(self, "_copy_range_restore_job", None):
             self.after_cancel(self._copy_range_restore_job)
-        self._copy_range_restore_job = self.after(1200, lambda: self.btn_copy_range.configure(
-            text="⏱ 区間コピー", fg_color=COLOR_BG_BUTTON, text_color=COLOR_TEXT_MAIN))
+        def _restore_range_btn():
+            self.set_btn_kind(self.btn_copy_range, "accent")
+            self.btn_copy_range.configure(text="⏱ 区間コピー")
+        self._copy_range_restore_job = self.after(1200, _restore_range_btn)
         self.flash_status(f"区間コピー: {range_str}", COLOR_PLAY_ACTIVE, 2500)
 
     # -------------------------------------------------------------------------
@@ -1775,7 +1808,7 @@ class DictaApp(ctk.CTk):
         def edit_key(action_key):
             ed = ctk.CTkToplevel(dlg)
             ed.title(f"キー変更: {HOTKEY_NAMES.get(action_key, action_key)}")
-            ed.geometry("580x420")
+            ed.geometry("620x480")
             ed.configure(fg_color=COLOR_BG_MAIN)
             ed.transient(dlg)
             ed.grab_set()
@@ -1786,27 +1819,45 @@ class DictaApp(ctk.CTk):
             cur = current_hotkeys.get(action_key, "")
             _, _, canon_cur = parse_hotkey_string(cur)
             lbl_cur = ctk.CTkLabel(p, text=f"現在の設定: {canon_cur or '（なし）'}", font=self.F(16), text_color=COLOR_NEON_CYAN)
-            lbl_cur.pack(anchor="w", pady=(0, 10))
+            lbl_cur.pack(anchor="w", pady=(0, 8))
 
-            # --- 1. キーボード直接入力キャプチャ ---
+            # --- 状態管理（累積・順次追加方式） ---
+            current_mods = set()
+            current_main = ["（なし）"]
+
+            # 初期値の分解
+            for pt in [x.strip() for x in cur.replace(" ", "").split("+") if x.strip()]:
+                u = pt.upper()
+                if u == "SHIFT": current_mods.add("Shift")
+                elif u == "CTRL": current_mods.add("Ctrl")
+                elif u == "ALT": current_mods.add("Alt")
+                else: current_main[0] = pt.upper()
+
+            # --- 1. 順番に追加できるキーボード直接入力 ＆ クイック追加ボタン ---
             cap_box = ctk.CTkFrame(p, fg_color="#071224", corner_radius=10, border_width=2, border_color="#1E3A5F")
-            cap_box.pack(fill="x", pady=(0, 12), ipady=2)
-            ctk.CTkLabel(cap_box, text="⌨ キーボード直接入力（ここをクリックしてキーを押す）:", font=self.F(14), text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=12, pady=(6, 2))
+            cap_box.pack(fill="x", pady=(0, 10), ipady=4)
 
-            btn_key_capture = ctk.CTkButton(
+            lbl_hint = ctk.CTkLabel(cap_box, text="⌨ キーボードを押すか、ボタンをクリックして順番に追加できます:",
+                                    font=self.F(14), text_color=COLOR_TEXT_SUB)
+            lbl_hint.pack(anchor="w", padx=12, pady=(6, 2))
+
+            # 大きく見やすい現在の組み合わせプレビュー
+            lbl_combo_preview = ctk.CTkLabel(
                 cap_box,
-                text="ここをクリックしてキーボードを押すと自動設定",
-                font=self.F(15, bold=True),
-                height=40,
+                text="[ ここをクリックしてキーボードを押す ]",
+                font=self.F(17, bold=True, mono=True),
+                height=42,
                 fg_color="#0C1B33",
-                hover_color="#162E54",
-                border_width=2,
-                border_color=COLOR_NEON_CYAN,
-                text_color=COLOR_TEXT_MAIN
+                corner_radius=8,
+                text_color=COLOR_PLAY_ACTIVE
             )
-            btn_key_capture.pack(fill="x", padx=12, pady=(2, 8))
+            lbl_combo_preview.pack(fill="x", padx=12, pady=(2, 6))
 
-            # --- 2. 手動選択エリア ---
+            # クイック追加ボタン列（ポチポチ押して順次追加できる）
+            btn_row = ctk.CTkFrame(cap_box, fg_color="transparent")
+            btn_row.pack(fill="x", padx=12, pady=(0, 6))
+
+            # --- 2. 手動選択エリア（チェックボックス ＆ ドロップダウン） ---
             ctk.CTkLabel(p, text="またはチェックボックスと一覧から手動で選択:", font=self.F(14), text_color=COLOR_TEXT_SUB).pack(anchor="w", pady=(2, 4))
 
             mf = ctk.CTkFrame(p, fg_color="transparent")
@@ -1815,7 +1866,7 @@ class DictaApp(ctk.CTk):
             for m in ("Shift", "Ctrl", "Alt"):
                 cb = ctk.CTkCheckBox(mf, text=m, width=95, font=self.F(16))
                 cb.pack(side="left", padx=4)
-                if m.upper() in cur.upper():
+                if m in current_mods:
                     cb.select()
                 chks[m] = cb
 
@@ -1824,83 +1875,140 @@ class DictaApp(ctk.CTk):
             ctk.CTkLabel(kr, text="キー:", font=self.F(16)).pack(side="left", padx=4)
             keys_list = ["（なし）"] + [f"F{i}" for i in range(1, 13)] + list("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + \
                 list("0123456789") + ["SPACE", "UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "HOME", "END", "PGUP", "PGDN", "INS", "DEL"]
-            base_key = "（なし）"
-            for pt in [x.strip().upper() for x in cur.replace(" ", "").split("+") if x.strip()]:
-                if pt not in ("SHIFT", "CTRL", "ALT", "WIN"):
-                    base_key = pt
+
             ok_ = ctk.CTkOptionMenu(kr, values=keys_list, width=170, height=36, font=self.F(16), dropdown_font=self.F(15),
                                     fg_color=COLOR_BG_BUTTON, button_color=COLOR_CYAN_MID)
             ok_.pack(side="left", padx=8)
-            ok_.set(base_key if base_key in keys_list else "（なし）")
+            ok_.set(current_main[0] if current_main[0] in keys_list else "（なし）")
 
-            # キーボードキャプチャのイベントリスナー
-            is_capturing = [False]
+            # UIの同期関数
+            def sync_ui():
+                parts = []
+                for m in ("Shift", "Ctrl", "Alt"):
+                    if m in current_mods:
+                        parts.append(m)
+                        chks[m].select()
+                    else:
+                        chks[m].deselect()
+                if current_main[0] and current_main[0] != "（なし）":
+                    parts.append(current_main[0])
+                    ok_.set(current_main[0])
+                else:
+                    ok_.set("（なし）")
 
-            def start_capture():
-                is_capturing[0] = True
-                btn_key_capture.configure(
-                    text="キーを押してください...（例: Ctrl+Alt+W）",
-                    fg_color="#18365D",
-                    border_color=COLOR_ISOLATOR_ON,
-                    text_color=COLOR_ISOLATOR_ON
-                )
-                ed.focus_set()
+                if parts:
+                    lbl_combo_preview.configure(
+                        text=" + ".join(parts),
+                        text_color=COLOR_PLAY_ACTIVE,
+                        fg_color="#0C1B33"
+                    )
+                else:
+                    lbl_combo_preview.configure(
+                        text="（キーを押すか、下のボタンで追加してください）",
+                        text_color=COLOR_TEXT_SUB,
+                        fg_color="#0C1B33"
+                    )
 
-            btn_key_capture.configure(command=start_capture)
+            # チェックボックスやメニューを手動変更した時
+            for m in ("Shift", "Ctrl", "Alt"):
+                def _chk_cmd(mod=m):
+                    if chks[mod].get():
+                        current_mods.add(mod)
+                    else:
+                        current_mods.discard(mod)
+                    sync_ui()
+                chks[m].configure(command=_chk_cmd)
 
+            def _menu_cmd(val):
+                current_main[0] = val
+                sync_ui()
+            ok_.configure(command=_menu_cmd)
+
+            # ボタンで順次追加
+            def add_modifier(m):
+                current_mods.add(m)
+                sync_ui()
+
+            def clear_all():
+                current_mods.clear()
+                current_main[0] = "（なし）"
+                sync_ui()
+
+            def remove_last():
+                if current_main[0] != "（なし）":
+                    current_main[0] = "（なし）"
+                elif "Alt" in current_mods:
+                    current_mods.remove("Alt")
+                elif "Ctrl" in current_mods:
+                    current_mods.remove("Ctrl")
+                elif "Shift" in current_mods:
+                    current_mods.remove("Shift")
+                sync_ui()
+
+            # クイックボタン配置
+            self.btn(btn_row, "+ Shift", lambda: add_modifier("Shift"), size=14, height=32, width=80, kind="accent").pack(side="left", padx=2)
+            self.btn(btn_row, "+ Ctrl", lambda: add_modifier("Ctrl"), size=14, height=32, width=80, kind="accent").pack(side="left", padx=2)
+            self.btn(btn_row, "+ Alt", lambda: add_modifier("Alt"), size=14, height=32, width=80, kind="accent").pack(side="left", padx=2)
+            self.btn(btn_row, "⌫ 1つ消す", remove_last, size=14, height=32, width=95, kind="normal").pack(side="left", padx=6)
+            self.btn(btn_row, "全消去", clear_all, size=14, height=32, width=75, kind="danger").pack(side="left", padx=2)
+
+            # キーボード入力イベント
             def on_key_press(event):
-                if not is_capturing[0]:
-                    return
                 sym = event.keysym.upper()
-                if sym in ("SHIFT_L", "SHIFT_R", "CONTROL_L", "CONTROL_R", "ALT_L", "ALT_R", "WIN_L", "WIN_R"):
-                    s, c, a = get_current_modifiers()
-                    parts = [m for m, val in [("Shift", s), ("Ctrl", c), ("Alt", a)] if val]
-                    btn_key_capture.configure(text=" + ".join(parts) + " + ..." if parts else "キーを押してください...")
+
+                # 修飾キー
+                if sym in ("SHIFT_L", "SHIFT_R"):
+                    current_mods.add("Shift")
+                    sync_ui()
+                    return "break"
+                elif sym in ("CONTROL_L", "CONTROL_R"):
+                    current_mods.add("Ctrl")
+                    sync_ui()
+                    return "break"
+                elif sym in ("ALT_L", "ALT_R"):
+                    current_mods.add("Alt")
+                    sync_ui()
+                    return "break"
+                elif sym in ("BACKSPACE",):
+                    remove_last()
+                    return "break"
+                elif sym in ("ESCAPE", "DELETE"):
+                    clear_all()
                     return "break"
 
+                # 同時押しされている修飾キーも拾う
                 s, c, a = get_current_modifiers()
+                if s: current_mods.add("Shift")
+                if c: current_mods.add("Ctrl")
+                if a: current_mods.add("Alt")
+
                 key_map = {
-                    "RETURN": "ENTER", "ESCAPE": "ESC", "BACKSPACE": "BACKSPACE",
-                    "TAB": "TAB", "SPACE": "SPACE", "PRIOR": "PGUP", "NEXT": "PGDN",
-                    "DELETE": "DEL", "INSERT": "INS", "UP": "UP", "DOWN": "DOWN",
-                    "LEFT": "LEFT", "RIGHT": "RIGHT"
+                    "RETURN": "ENTER", "KP_ENTER": "ENTER", "TAB": "TAB", "SPACE": "SPACE",
+                    "PRIOR": "PGUP", "NEXT": "PGDN", "INSERT": "INS", "UP": "UP",
+                    "DOWN": "DOWN", "LEFT": "LEFT", "RIGHT": "RIGHT"
                 }
                 main_k = key_map.get(sym, sym)
                 if len(main_k) == 1 and main_k.isalpha():
                     main_k = main_k.upper()
-                elif main_k.startswith("F") and main_k[1:].isdigit():
-                    pass
 
-                if main_k in keys_list:
-                    if s: chks["Shift"].select()
-                    else: chks["Shift"].deselect()
-                    if c: chks["Ctrl"].select()
-                    else: chks["Ctrl"].deselect()
-                    if a: chks["Alt"].select()
-                    else: chks["Alt"].deselect()
-                    ok_.set(main_k)
-
-                    parts = [m for m, val in [("Shift", s), ("Ctrl", c), ("Alt", a)] if val] + [main_k]
-                    res_str = "+".join(parts)
-                    _, _, canon = parse_hotkey_string(res_str)
-                    btn_key_capture.configure(
-                        text=f"✓ 設定完了: {canon}（もう一度クリックで再入力）",
-                        fg_color="#0B261A",
-                        border_color=COLOR_PLAY_ACTIVE,
-                        text_color=COLOR_PLAY_ACTIVE
-                    )
-                    is_capturing[0] = False
+                if main_k in keys_list and main_k != "（なし）":
+                    current_main[0] = main_k
+                    sync_ui()
                 return "break"
 
             ed.bind("<KeyPress>", on_key_press)
+            lbl_combo_preview.bind("<Button-1>", lambda e: ed.focus_set())
+            sync_ui()
 
             def save_key():
-                k = ok_.get()
-                if k == "（なし）":
+                k = current_main[0]
+                if not current_mods and (k == "（なし）" or not k):
                     current_hotkeys[action_key] = ""
                     key_vars[action_key].set("（未設定）")
                 else:
-                    parts = [m for m in ("Shift", "Ctrl", "Alt") if chks[m].get()] + [k]
+                    parts = [m for m in ("Shift", "Ctrl", "Alt") if m in current_mods]
+                    if k and k != "（なし）":
+                        parts.append(k)
                     new_str = "+".join(parts)
                     _, _, canon = parse_hotkey_string(new_str)
                     for other, v in current_hotkeys.items():

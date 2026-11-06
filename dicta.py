@@ -987,7 +987,7 @@ class DictaApp(ctk.CTk):
             anchor="w", font=self.F(19), text_color=COLOR_TEXT_MAIN)
         self.lbl_filename.pack(side="left", fill="x", expand=True, padx=16, pady=8)
         self.btn_close_file = self.btn(
-            file_box, "✕ 閉じる", self.action_close_file, size=15, height=44, width=110,
+            file_box, "解除する", self.action_close_file, size=17, height=44, width=180,
             kind="normal"
         )
         self.btn_close_file.pack(side="right", padx=(4, 12), pady=6)
@@ -2719,9 +2719,9 @@ class DictaApp(ctk.CTk):
 
         def refresh_reg_status():
             if is_registered and is_registered():
-                lbl_reg_status.configure(text="● 現在の状態: 「プログラムから開く」に登録済み", text_color=COLOR_PLAY_ACTIVE)
+                lbl_reg_status.configure(text="● 現在の状態: 登録済み", text_color=COLOR_PLAY_ACTIVE)
             else:
-                lbl_reg_status.configure(text="○ 現在の状態: 未登録（右クリック一覧には出ません）", text_color=COLOR_TEXT_SUB)
+                lbl_reg_status.configure(text="○ 現在の状態: 未登録", text_color=COLOR_TEXT_SUB)
 
         def do_register():
             if register_open_with and register_open_with():
@@ -2736,8 +2736,8 @@ class DictaApp(ctk.CTk):
         refresh_reg_status()
         reg_btn_box = ctk.CTkFrame(reg_row, fg_color="transparent")
         reg_btn_box.pack(side="right")
-        self.btn(reg_btn_box, "「プログラムから開く」に登録する", do_register, size=14, height=38, width=300, kind="primary").pack(side="left", padx=(0, 8))
-        self.btn(reg_btn_box, "登録を解除する", do_unregister, size=14, height=38, width=140, kind="danger").pack(side="left")
+        self.btn(reg_btn_box, "「プログラムから開く」に登録する", do_register, size=14, height=38, width=260, kind="primary").pack(side="left", padx=(0, 10))
+        self.btn(reg_btn_box, "登録を解除する", do_unregister, size=14, height=38, width=170, kind="danger").pack(side="left")
 
         def save_and_close():
             try:

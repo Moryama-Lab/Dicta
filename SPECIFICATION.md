@@ -29,10 +29,12 @@ Dicta は、「文字起こしに最適化された操作感」「一時停止�
 
 ```
 dicta/
+├── Dicta.exe            # 64bit ネイティブランチャー（起動ラグ0.01秒、右クリックメニュー用）
 ├── dicta.py             # メインアプリケーション（GUI、イベントループ、設定管理、解析描画）
 ├── bass_engine.py       # BASS Native C API ctypesバインディング＆再生エンジン
 ├── hotkey_manager.py    # 低遅延・自己修復型グローバルホットキー監視マネージャー
 ├── register_open_with.py# Windows 右クリック「プログラムから開く」登録・解除スクリプト
+├── build_launcher.py    # Dicta.exe ビルド・再コンパイルスクリプト（Windows標準 csc.exe 利用）
 ├── config.default.json  # 初期配布用デフォルト設定テンプレート（個人情報ゼロ）
 ├── config.json          # ユーザー環境ローカル設定ファイル（自動生成・Git除外）
 ├── README.md            # 一般利用者向け導入・操作ガイド
@@ -202,5 +204,6 @@ Wordやブラウザが最前面にある状態でもバックグラウンドで�
 
 ---
 
-## 8. 開発・クレジット
+## 8. 開発・クレジット・謝辞
 - **Author & Developer**: **Moryama-Lab** & **Google Antigravity (Gemini 4 Argon)**
+- **Concept & Heritage**: Dedicated to the classic workflow popularized by "Okoshiyasu2" by Hiroshi Hayasaka (完全新規設計・独自実装によるリスペクト作品)

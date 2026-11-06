@@ -20,23 +20,31 @@ def get_paths():
     dicta_dir = os.path.abspath(os.path.dirname(__file__))
     dicta_py = os.path.join(dicta_dir, "dicta.py")
     ico_path = os.path.join(dicta_dir, "dicta.ico")
+    exe_path = os.path.join(dicta_dir, "Dicta.exe")
     
     # pythonw.exe を優先使用（黒いコンソール窓が出ない）
     py_dir = os.path.dirname(sys.executable)
     pythonw_exe = os.path.join(py_dir, "pythonw.exe")
     if not os.path.exists(pythonw_exe):
         pythonw_exe = sys.executable
-    return dicta_dir, dicta_py, ico_path, pythonw_exe
+    return dicta_dir, dicta_py, ico_path, exe_path, pythonw_exe
 
 def register_open_with():
-    dicta_dir, dicta_py, ico_path, pythonw_exe = get_paths()
-    cmd = f'"{pythonw_exe}" "{dicta_py}" "%1"'
+    dicta_dir, dicta_py, ico_path, exe_path, pythonw_exe = get_paths()
+    # Dicta.exe が存在すればそれを最優先（Windows Explorer のプログラムから開くに「Python」ではなく「Dicta」と美しく表示される）
+    if os.path.exists(exe_path):
+        cmd = f'"{exe_path}" "%1"'
+        target_icon = f'"{exe_path}",0'
+    else:
+        cmd = f'"{pythonw_exe}" "{dicta_py}" "%1"'
+        target_icon = f'"{ico_path}",0' if os.path.exists(ico_path) else f'"{pythonw_exe}",0'
 
     try:
         # 1. HKEY_CURRENT_USER\Software\Classes\Applications\Dicta.exe
         app_key_path = r"Software\Classes\Applications\Dicta.exe"
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, app_key_path) as app_key:
             winreg.SetValueEx(app_key, "FriendlyAppName", 0, winreg.REG_SZ, "Dicta")
+            winreg.SetValueEx(app_key, "ApplicationCompany", 0, winreg.REG_SZ, "Moryama-Lab")
             winreg.SetValueEx(app_key, "", 0, winreg.REG_SZ, "Dicta - 音声文字起こし再生スタジオ")
 
         # 2. SupportedTypes
@@ -46,10 +54,9 @@ def register_open_with():
                 winreg.SetValueEx(sup_key, ext, 0, winreg.REG_SZ, "")
 
         # 3. DefaultIcon
-        if os.path.exists(ico_path):
-            icon_key_path = rf"{app_key_path}\DefaultIcon"
-            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, icon_key_path) as icon_key:
-                winreg.SetValueEx(icon_key, "", 0, winreg.REG_SZ, f"{ico_path},0")
+        icon_key_path = rf"{app_key_path}\DefaultIcon"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, icon_key_path) as icon_key:
+            winreg.SetValueEx(icon_key, "", 0, winreg.REG_SZ, target_icon)
 
         # 4. shell\open\command
         shell_key_path = rf"{app_key_path}\shell\open\command"
@@ -61,6 +68,29 @@ def register_open_with():
             owl_path = rf"Software\Classes\{ext}\OpenWithList\Dicta.exe"
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, owl_path) as owl_key:
                 winreg.SetValueEx(owl_key, "", 0, winreg.REG_SZ, "")
+
+        # 6. デスクトップショートカットも Dicta.exe を指すように更新
+        desktop = os.path.join(os.environ["USERPROFILE"], "Desktop")
+        shortcut_path = os.path.join(desktop, "Dicta.lnk")
+        if os.path.exists(exe_path):
+            import subprocess
+            vbs_code = f'''Set ws = CreateObject("WScript.Shell")
+Set sc = ws.CreateShortcut("{shortcut_path}")
+sc.TargetPath = "{exe_path}"
+sc.WorkingDirectory = "{dicta_dir}"
+sc.IconLocation = "{exe_path},0"
+sc.Description = "Dicta - 音声文字起こし再生スタジオ"
+sc.WindowStyle = 1
+sc.Save
+'''
+            vbs_file = os.path.join(dicta_dir, "_temp_lnk.vbs")
+            with open(vbs_file, "w", encoding="utf-16") as f:
+                f.write(vbs_code)
+            try:
+                subprocess.run(["cscript", "//nologo", vbs_file], check=True)
+            finally:
+                if os.path.exists(vbs_file):
+                    os.remove(vbs_file)
 
         # シェルキャッシュ更新
         ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)

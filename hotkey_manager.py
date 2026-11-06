@@ -45,27 +45,64 @@ MOD_NOREPEAT = 0x4000
 
 VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN = 0x10, 0x11, 0x12, 0x5B, 0x5C
 
-# Virtual Keys mapping
+# Virtual Keys mapping (あらゆる標準キー・テンキー・記号・特殊キーを網羅)
 VK_KEYS = {
-    "F1": 0x70, "F2": 0x71, "F3": 0x72, "F4": 0x73, "F5": 0x74, "F6": 0x75,
-    "F7": 0x76, "F8": 0x77, "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F12": 0x7B,
     "SPACE": 0x20, "LEFT": 0x25, "UP": 0x26, "RIGHT": 0x27, "DOWN": 0x28,
-    "ESC": 0x1B, "TAB": 0x09, "ENTER": 0x0D, "BACKSPACE": 0x08,
-    "HOME": 0x24, "END": 0x23, "PGUP": 0x21, "PGDN": 0x22, "INS": 0x2D, "DEL": 0x2E
+    "ESC": 0x1B, "ESCAPE": 0x1B, "TAB": 0x09, "ENTER": 0x0D, "RETURN": 0x0D,
+    "BACKSPACE": 0x08, "BS": 0x08,
+    "HOME": 0x24, "END": 0x23, "PGUP": 0x21, "PGDN": 0x22, "PRIOR": 0x21, "NEXT": 0x22,
+    "INS": 0x2D, "INSERT": 0x2D, "DEL": 0x2E, "DELETE": 0x2E,
+    "PAUSE": 0x13, "CAPSLOCK": 0x14, "SCROLLLOCK": 0x91, "PRINTSCREEN": 0x2C, "APPS": 0x5D,
+    "無変換": 0x1D, "NONCONVERT": 0x1D, "変換": 0x1C, "CONVERT": 0x1C, "かな": 0x15,
+    # テンキー
+    "NUM0": 0x60, "NUM1": 0x61, "NUM2": 0x62, "NUM3": 0x63, "NUM4": 0x64,
+    "NUM5": 0x65, "NUM6": 0x66, "NUM7": 0x67, "NUM8": 0x68, "NUM9": 0x69,
+    "NUM*": 0x6A, "NUM+": 0x6B, "NUMPLUS": 0x6B, "NUM-": 0x6D, "NUM.": 0x6E, "NUM/": 0x6F,
+    # 記号キー
+    "-": 0xBD, "MINUS": 0xBD, "^": 0xDE, "=": 0xBB, "\\": 0xDC, "YEN": 0xDC,
+    "@": 0xC0, "[": 0xDB, ";": 0xBB, ":": 0xBA, "]": 0xDD,
+    ",": 0xBC, ".": 0xBE, "/": 0xBF, "_": 0xE2,
+    # メディアキー等
+    "MEDIA_PLAY_PAUSE": 0xB3, "MEDIA_STOP": 0xB2, "MEDIA_NEXT": 0xB0, "MEDIA_PREV": 0xB1,
+    "VOLUME_MUTE": 0xAD, "VOLUME_DOWN": 0xAE, "VOLUME_UP": 0xAF,
 }
+for i in range(1, 25):
+    VK_KEYS[f"F{i}"] = 0x70 + (i - 1)
 for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789":
     VK_KEYS[c] = ord(c)
+
+# 逆引きテーブル（表示名の正規化用）
+VK_TO_NAME = {
+    0x20: "SPACE", 0x25: "LEFT", 0x26: "UP", 0x27: "RIGHT", 0x28: "DOWN",
+    0x1B: "ESC", 0x09: "TAB", 0x0D: "ENTER", 0x08: "BACKSPACE",
+    0x24: "HOME", 0x23: "END", 0x21: "PGUP", 0x22: "PGDN",
+    0x2D: "INS", 0x2E: "DEL", 0x13: "PAUSE", 0x14: "CAPSLOCK",
+    0x91: "SCROLLLOCK", 0x2C: "PRINTSCREEN", 0x5D: "APPS",
+    0x1D: "無変換", 0x1C: "変換", 0x15: "かな",
+    0x60: "NUM0", 0x61: "NUM1", 0x62: "NUM2", 0x63: "NUM3", 0x64: "NUM4",
+    0x65: "NUM5", 0x66: "NUM6", 0x67: "NUM7", 0x68: "NUM8", 0x69: "NUM9",
+    0x6A: "NUM*", 0x6B: "NUM+", 0x6D: "NUM-", 0x6E: "NUM.", 0x6F: "NUM/",
+    0xBD: "-", 0xDE: "^", 0xDC: "\\", 0xC0: "@", 0xDB: "[",
+    0xBB: ";", 0xBA: ":", 0xDD: "]", 0xBC: ",", 0xBE: ".", 0xBF: "/", 0xE2: "_",
+    0xB3: "MEDIA_PLAY_PAUSE", 0xB2: "MEDIA_STOP", 0xB0: "MEDIA_NEXT", 0xB1: "MEDIA_PREV",
+    0xAD: "VOLUME_MUTE", 0xAE: "VOLUME_DOWN", 0xAF: "VOLUME_UP",
+}
+for i in range(1, 25):
+    VK_TO_NAME[0x70 + (i - 1)] = f"F{i}"
+for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789":
+    VK_TO_NAME[ord(c)] = c
 
 
 def parse_hotkey_string(hk_str):
     """
-    'Shift+Ctrl+Alt+W' / 'Ctrl+Space' / 'F4' を解析する。
+    'Shift+Ctrl+Alt+W' / 'Ctrl+Space' / 'F4' 等あらゆるキー表記を解析する。
     Returns: (mods, vk, display_str) or (None, None, '')
     """
     if not hk_str or hk_str.strip() == "":
         return None, None, ""
 
-    parts = [p.strip().upper() for p in hk_str.replace(" ", "").split("+") if p.strip()]
+    safe_str = hk_str.replace("NUM+", "NUMPLUS")
+    parts = [p.strip().upper() for p in safe_str.replace(" ", "").split("+") if p.strip()]
     if not parts:
         return None, None, ""
 
@@ -83,7 +120,26 @@ def parse_hotkey_string(hk_str):
         else:
             key = p
 
-    if not key or key not in VK_KEYS:
+    vk = None
+    disp_key = None
+    if key in VK_KEYS:
+        vk = VK_KEYS[key]
+        disp_key = VK_TO_NAME.get(vk, key)
+    elif key and key.startswith("VK") and key[2:].isdigit():
+        vk = int(key[2:])
+        disp_key = VK_TO_NAME.get(vk, key)
+    elif key is None:
+        # 修飾キー単体または修飾キー同士の組み合わせ（例: Shift / Shift+Ctrl 等）にも対応
+        if alt:
+            vk, disp_key, alt = VK_MENU, "Alt", False
+        elif ctrl:
+            vk, disp_key, ctrl = VK_CONTROL, "Ctrl", False
+        elif shift:
+            vk, disp_key, shift = VK_SHIFT, "Shift", False
+        elif win:
+            vk, disp_key, win = VK_LWIN, "Win", False
+
+    if vk is None:
         return None, None, ""
 
     mods = MOD_NOREPEAT
@@ -105,8 +161,8 @@ def parse_hotkey_string(hk_str):
         tokens.append("Alt")
     if win:
         tokens.append("Win")
-    tokens.append(key)
-    return mods, VK_KEYS[key], " + ".join(tokens)
+    tokens.append(disp_key)
+    return mods, vk, " + ".join(tokens)
 
 
 def _key_down(vk):

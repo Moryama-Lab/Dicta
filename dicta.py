@@ -1,13 +1,14 @@
 """
 Dicta（ディクタ）— 文字起こし再生スタジオ  v3.2
 
-Okoshiyasu2 の全機能を上位互換で再実装した、64bit・耐フリーズ設計の文字起こし専用プレーヤー。
+学術・プロフェッショナル向けに設計・開発された、64bit・耐フリーズ設計の文字起こし専用プレーヤー。
   - サクサク高速起動 & 起動時スムーズ最大化（チラつきゼロ）
   - 極太・高品位アンチエイリアス進捗バー（Pillow 4xスーパーサンプリング超滑らか円球ツマミ）
   - 進捗バー直結のしおり機能（黄色縦線のみ・クリックでジャンプ・右クリックで削除）
   - 時間コピー ＆ 区間コピー（A点〜B点を '01:30:27,175 --> 01:30:37,420' でワンクリックコピー）
   - 操作ボタンのサイズ均一化（最初から／しおり追加／しおり全消去）＆ 直感的な色の区別
-  - ショートカット設定の「キーボード直接入力キャプチャ」と「選択式」の完全両立
+  - ショートカット設定のシンプルダイレクト入力（押したキーがそのまま入る直感設計）
+  - 精密音響解析（波形＋スペクトル／倍音・ピーク／スペクトログラム）＆ 抽出枠のドラッグ伸縮
   - ウィンドウ左上にGitコミット日付＆バージョンを自動参照表示（ウィンドウ上部表記の洗練）
   - 再生速度レンジ拡張（0.20倍〜3.00倍）
   - 音量コントロールを右下（イコライザー下）に自然配置
@@ -42,7 +43,7 @@ ScalingTracker.get_window_dpi_scaling = lambda *args, **kwargs: 1.25
 ScalingTracker.check_dpi_scaling = lambda *args, **kwargs: None
 
 from bass_engine import BassAudioEngine
-from hotkey_manager import HotkeyManager, parse_hotkey_string
+from hotkey_manager import HotkeyManager, parse_hotkey_string, VK_TO_NAME, VK_KEYS
 
 user32 = ctypes.windll.user32
 
@@ -359,9 +360,9 @@ class MainSeekBar(tk.Canvas):
         self.it_loop_rect = self.create_rectangle(0, 0, 0, 0, fill="#5C0D1C", outline="", state="hidden")
         self.it_prog = self.create_line(0, 0, 0, 0, fill=COLOR_NEON_CYAN, width=self.track_th, capstyle="round")
 
-        # Pillow 4xスーパーサンプリングによる完全アンチエイリアスThumb画像
+        # Pillow 4xスーパーサンプリングによる完全アンチエイリアスThumb画像（ホバー時の見にくい黄色変化を廃止し、常に鮮明な水色枠を維持）
         self.img_thumb_norm = make_smooth_circle_image(self.r_norm, max(2, int(2.5 * scale)), "#FFFFFF", COLOR_NEON_CYAN)
-        self.img_thumb_big = make_smooth_circle_image(self.r_big, max(3, int(3.5 * scale)), "#FFFFFF", COLOR_ISOLATOR_ON)
+        self.img_thumb_drag = make_smooth_circle_image(self.r_norm + 1, max(3, int(3.0 * scale)), "#FFFFFF", COLOR_NEON_CYAN)
         self.it_thumb = self.create_image(0, 0, image=self.img_thumb_norm)
 
         # Dynamic markers
@@ -460,8 +461,8 @@ class MainSeekBar(tk.Canvas):
         xp = self.sec_to_x(self.position)
         self.coords(self.it_prog, x0, self.track_y, max(x0, xp), self.track_y)
 
-        # アンチエイリアス画像の切替と配置
-        img = self.img_thumb_big if (self.dragging or self.hover_x is not None) else self.img_thumb_norm
+        # アンチエイリアス画像の切替と配置（ホバー時は変化させず、ドラッグ中のみわずかにサイズ変化）
+        img = self.img_thumb_drag if self.dragging else self.img_thumb_norm
         self.itemconfigure(self.it_thumb, image=img)
         self.coords(self.it_thumb, xp, self.track_y)
 
@@ -619,6 +620,10 @@ class DictaApp(ctk.CTk):
         self._status_restore_job = None
         self._analyzer_idle_drawn = False
         self.spec_history = deque(maxlen=42)
+        self.peak_hold = [0.0] * 44
+        self._iso_drag_mode = None
+        self._iso_drag_fixed_hz = 1200.0
+        self._iso_drag_ratio_offset = 0.0
 
         step = lambda: self.config.get("speed_step", 0.05)
         self.action_dispatch = {
@@ -701,8 +706,8 @@ class DictaApp(ctk.CTk):
         "primary": dict(fg_color=COLOR_CYAN_MID, hover_color=COLOR_CYAN_DARK, border_color=COLOR_NEON_CYAN, text_color=COLOR_TEXT_MAIN),
         "danger": dict(fg_color="#5C1D2B", hover_color="#7F263A", border_color="#F43F5E", text_color=COLOR_TEXT_MAIN),
         "play": dict(fg_color=COLOR_PLAY_ACTIVE, hover_color="#00B87A", border_color="#FFFFFF", text_color=COLOR_TEXT_DARK),
-        # 最初から・しおり操作ボタン（目立ちすぎず品のあるスレートパープル ＆ 明快な色の区別）
-        "sub_head": dict(fg_color="#181526", hover_color="#28203B", border_color="#5E4E7A", text_color="#D8CEE8"),
+        # 最初から・しおり操作ボタン（しおり追加と同等の明瞭な存在感と色分け）
+        "sub_head": dict(fg_color="#24143B", hover_color="#381E5E", border_color="#A855F7", text_color="#F3E8FF"),
         "sub_bm": dict(fg_color="#2A2006", hover_color="#423208", border_color="#FFB300", text_color="#FDE047"),
         "sub_del": dict(fg_color="#2A1018", hover_color="#401824", border_color="#E11D48", text_color="#FDA4AF"),
     }
@@ -836,10 +841,10 @@ class DictaApp(ctk.CTk):
         copy_row = ctk.CTkFrame(acol, fg_color="transparent")
         copy_row.pack(fill="x", pady=(0, 6))
 
-        self.btn_copy = self.btn(copy_row, "📋 時間コピー", self.action_counter_copy, size=17, height=48, width=155, kind="accent")
+        self.btn_copy = self.btn(copy_row, "📋 時間コピー", self.action_counter_copy, size=17, height=48, width=160, kind="accent")
         self.btn_copy.pack(side="left", padx=(0, 6))
 
-        self.btn_copy_range = self.btn(copy_row, "⏱ 区間コピー", self.action_range_copy, size=17, height=48, width=155, kind="accent")
+        self.btn_copy_range = self.btn(copy_row, "⏱ 区間コピー", self.action_range_copy, size=17, height=48, width=160, kind="accent")
         self.btn_copy_range.pack(side="left")
 
         self.seg_copy = ctk.CTkSegmentedButton(
@@ -867,9 +872,9 @@ class DictaApp(ctk.CTk):
         ctrl = ctk.CTkFrame(transport_box, fg_color="transparent")
         ctrl.pack(fill="x", padx=14, pady=(4, 10))
 
-        # 一番左に「最初から」を控えめなサイズ（幅135px）で配置
-        self.btn_stop = self.btn(ctrl, "⏮ 最初から", self.action_stop, size=16, height=48, width=135, kind="sub_head", radius=10)
-        self.btn_stop.pack(side="left", padx=(4, 8))
+        # 一番左の「最初から」と右側の「しおり追加」「しおり全消去」を同一サイズ（幅155px・高さ48px・文字16pt）に統一
+        self.btn_stop = self.btn(ctrl, "⏮ 最初から", self.action_stop, size=16, height=48, width=155, kind="sub_head", radius=10)
+        self.btn_stop.pack(side="left", padx=(4, 10))
 
         # メイン再生3グループ（「5秒戻る・再生・5秒進む」は大きく均等に展開）
         main_grp = ctk.CTkFrame(ctrl, fg_color="transparent")
@@ -886,11 +891,11 @@ class DictaApp(ctk.CTk):
         self.btn_forward = self.btn(main_grp, "▶▶ 5秒進む", self.action_forward, size=18, height=48, kind="accent", radius=10)
         self.btn_forward.grid(row=0, column=2, sticky="ew", padx=4)
 
-        # しおり操作グループ（右側に配置、幅135px・高さ48px均一）
-        self.btn_bm_add = self.btn(ctrl, "しおり追加", self.action_bookmark_add, size=16, height=48, width=135, kind="sub_bm", radius=10)
-        self.btn_bm_add.pack(side="left", padx=(12, 4))
+        # しおり操作グループ（最初からボタンと完全同一サイズ：幅155px・高さ48px）
+        self.btn_bm_add = self.btn(ctrl, "しおり追加", self.action_bookmark_add, size=16, height=48, width=155, kind="sub_bm", radius=10)
+        self.btn_bm_add.pack(side="left", padx=(10, 4))
 
-        self.btn_bm_clear = self.btn(ctrl, "しおり全消去", self.action_bookmark_clear_all, size=15, height=48, width=135, kind="sub_del", radius=10)
+        self.btn_bm_clear = self.btn(ctrl, "しおり全消去", self.action_bookmark_clear_all, size=16, height=48, width=155, kind="sub_del", radius=10)
         self.btn_bm_clear.pack(side="left", padx=4)
 
         self.refresh_jump_labels()
@@ -916,18 +921,24 @@ class DictaApp(ctk.CTk):
         head.pack(fill="x", padx=16, pady=(8, 2))
         ctk.CTkLabel(head, text="精密音響解析", font=self.F(19), text_color=COLOR_TEXT_MAIN).pack(side="left")
         self.opt_ana_mode = ctk.CTkSegmentedButton(
-            head, values=["波形＋スペクトル", "スペクトログラム", "OFF"], font=self.F(14), height=34,
+            head, values=["波形＋スペクトル", "倍音・ピーク", "スペクトログラム", "OFF"], font=self.F(14), height=34,
             selected_color=COLOR_CYAN_MID, selected_hover_color=COLOR_CYAN_DARK, unselected_color=COLOR_BG_BUTTON,
             command=self.on_analyzer_mode_change)
         self.opt_ana_mode.pack(side="right")
         mode = self.config.get("analyzer_mode", "spectrum_wave")
-        self.opt_ana_mode.set({"spectrum_wave": "波形＋スペクトル", "spectrogram": "スペクトログラム"}.get(mode, "OFF"))
+        self.opt_ana_mode.set({
+            "spectrum_wave": "波形＋スペクトル",
+            "formant_peak": "倍音・ピーク",
+            "spectrogram": "スペクトログラム"
+        }.get(mode, "OFF"))
 
         self.ana_canvas = tk.Canvas(card, bg="#02050B", height=int(145 * self.ui_scale), highlightthickness=2,
                                     highlightbackground="#1E3A5F", cursor="crosshair")
         self.ana_canvas.pack(fill="both", expand=True, padx=16, pady=4)
-        self.ana_canvas.bind("<Button-1>", self.on_canvas_click_frequency)
-        self.ana_canvas.bind("<B1-Motion>", self.on_canvas_click_frequency)
+        self.ana_canvas.bind("<ButtonPress-1>", self.on_canvas_press_frequency)
+        self.ana_canvas.bind("<B1-Motion>", self.on_canvas_drag_frequency)
+        self.ana_canvas.bind("<ButtonRelease-1>", self.on_canvas_release_frequency)
+        self.ana_canvas.bind("<Motion>", self.on_canvas_motion_frequency)
         self.ana_canvas.bind("<Configure>", lambda e: setattr(self, "_analyzer_idle_drawn", False))
 
         iso = ctk.CTkFrame(card, corner_radius=10, fg_color="#071020", border_width=1, border_color="#1E3A5F")
@@ -960,7 +971,7 @@ class DictaApp(ctk.CTk):
         self.slider_iso_freq.set(1200)
         self.lbl_iso_bw = ctk.CTkLabel(sl, text="幅 1.2", font=self.F(14), text_color=COLOR_TEXT_MAIN, width=65, anchor="w")
         self.lbl_iso_bw.grid(row=0, column=2, sticky="w")
-        self.slider_iso_bw = ctk.CTkSlider(sl, from_=0.4, to=2.4, height=20, fg_color=COLOR_BG_BUTTON,
+        self.slider_iso_bw = ctk.CTkSlider(sl, from_=0.2, to=3.2, height=20, fg_color=COLOR_BG_BUTTON,
                                            progress_color=COLOR_NEON_CYAN, button_color="#FFFFFF",
                                            command=self.on_iso_slider_change)
         self.slider_iso_bw.grid(row=0, column=3, sticky="ew", padx=(4, 0))
@@ -1062,7 +1073,7 @@ class DictaApp(ctk.CTk):
         self.slider_vol = ctk.CTkSlider(
             vr, from_=0, to=100, number_of_steps=200, height=24,
             fg_color="#1B2E4B", progress_color=COLOR_NEON_CYAN, button_color="#FFFFFF",
-            button_hover_color=COLOR_ISOLATOR_ON, command=lambda v: self.on_volume_change(float(v) / 100.0))
+            button_hover_color=COLOR_NEON_CYAN, command=lambda v: self.on_volume_change(float(v) / 100.0))
         self.slider_vol.pack(side="left", fill="x", expand=True, padx=8)
         self.slider_vol.bind("<MouseWheel>", lambda e: self.adjust_volume(0.01 if e.delta > 0 else -0.01))
         self.btn(vr, "＋", lambda: self.adjust_volume(0.01), size=18, height=36, width=44, radius=6).pack(side="left")
@@ -1235,7 +1246,11 @@ class DictaApp(ctk.CTk):
     # Analyzer & isolator
     # -------------------------------------------------------------------------
     def on_analyzer_mode_change(self, val):
-        self.config["analyzer_mode"] = {"波形＋スペクトル": "spectrum_wave", "スペクトログラム": "spectrogram"}.get(val, "off")
+        self.config["analyzer_mode"] = {
+            "波形＋スペクトル": "spectrum_wave",
+            "倍音・ピーク": "formant_peak",
+            "スペクトログラム": "spectrogram"
+        }.get(val, "off")
         self._analyzer_idle_drawn = False
         if self.config["analyzer_mode"] == "off":
             self.ana_canvas.delete("all")
@@ -1243,35 +1258,124 @@ class DictaApp(ctk.CTk):
             h = max(60, self.ana_canvas.winfo_height())
             self.ana_canvas.create_text(w // 2, h // 2, text="解析モニター休止中（省電力）",
                                         fill=COLOR_TEXT_SUB, font=(FONT_UI, 14, "bold"))
+        else:
+            self.render_acoustic_analyzer()
 
     def apply_isolator_preset(self, enabled, center_hz, bw_oct, label_name):
         self.slider_iso_freq.set(center_hz)
         self.slider_iso_bw.set(bw_oct)
         self.engine.set_bandpass_isolator(enabled, center_hz, bw_oct)
         self.update_isolator_ui(active_preset=label_name if enabled else "通常（全域）")
+        self.render_acoustic_analyzer()
 
     def on_iso_slider_change(self, _=None):
         self.engine.set_bandpass_isolator(True, float(self.slider_iso_freq.get()), float(self.slider_iso_bw.get()))
         self.update_isolator_ui(active_preset="custom")
+        self.render_acoustic_analyzer()
 
-    def on_canvas_click_frequency(self, event):
+    def _freq_to_x(self, freq, w):
+        log_span = math.log10(10000.0 / 80.0)
+        f = max(80.0, min(10000.0, float(freq)))
+        return int(math.log10(f / 80.0) / log_span * w)
+
+    def _x_to_freq(self, x, w):
+        ratio = max(0.0, min(1.0, float(x) / max(1, w)))
+        return 80.0 * ((10000.0 / 80.0) ** ratio)
+
+    def _get_iso_box_x(self, w):
+        c_hz = self.engine.isolator_center_hz
+        bw = self.engine.isolator_bw_oct
+        lo = max(80.0, c_hz / (2 ** (bw / 2.0)))
+        hi = min(10000.0, c_hz * (2 ** (bw / 2.0)))
+        return self._freq_to_x(lo, w), self._freq_to_x(hi, w), lo, hi
+
+    def on_canvas_motion_frequency(self, event):
+        if not self.engine.isolator_enabled:
+            self.ana_canvas.configure(cursor="crosshair")
+            return
         w = max(1, self.ana_canvas.winfo_width())
-        ratio = max(0.0, min(1.0, event.x / w))
-        freq = max(150.0, min(5500.0, 80.0 * ((10000.0 / 80.0) ** ratio)))
+        x1, x2, _, _ = self._get_iso_box_x(w)
+        if abs(event.x - x1) <= 12 or abs(event.x - x2) <= 12:
+            self.ana_canvas.configure(cursor="sb_h_double_arrow")
+        elif x1 + 12 < event.x < x2 - 12:
+            self.ana_canvas.configure(cursor="fleur")
+        else:
+            self.ana_canvas.configure(cursor="crosshair")
+
+    def on_canvas_press_frequency(self, event):
+        w = max(1, self.ana_canvas.winfo_width())
+        if self.engine.isolator_enabled:
+            x1, x2, lo, hi = self._get_iso_box_x(w)
+            if abs(event.x - x1) <= 14:
+                self._iso_drag_mode = "left"
+                self._iso_drag_fixed_hz = hi
+                self.ana_canvas.configure(cursor="sb_h_double_arrow")
+                return
+            elif abs(event.x - x2) <= 14:
+                self._iso_drag_mode = "right"
+                self._iso_drag_fixed_hz = lo
+                self.ana_canvas.configure(cursor="sb_h_double_arrow")
+                return
+            elif x1 + 14 < event.x < x2 - 14:
+                self._iso_drag_mode = "move"
+                xc = self._freq_to_x(self.engine.isolator_center_hz, w)
+                self._iso_drag_ratio_offset = (xc - event.x) / w
+                self.ana_canvas.configure(cursor="fleur")
+                return
+
+        # 枠外クリックまたはOFF時：クリック位置を中心に設定
+        self._iso_drag_mode = "center"
+        self._iso_drag_ratio_offset = 0.0
+        freq = max(150.0, min(5500.0, self._x_to_freq(event.x, w)))
         self.slider_iso_freq.set(freq)
         self.engine.set_bandpass_isolator(True, freq, float(self.slider_iso_bw.get()))
         self.update_isolator_ui(active_preset="custom")
+        self.render_acoustic_analyzer()
+
+    def on_canvas_drag_frequency(self, event):
+        w = max(1, self.ana_canvas.winfo_width())
+        mode = self._iso_drag_mode
+        if mode in ("left", "right"):
+            f_mouse = max(85.0, min(9600.0, self._x_to_freq(event.x, w)))
+            f_fix = self._iso_drag_fixed_hz
+            f_lo = min(f_mouse, f_fix)
+            f_hi = max(f_mouse, f_fix)
+            # 最小幅（0.2オクターブ）の保証
+            min_ratio = 2.0 ** 0.2
+            if f_hi / max(1.0, f_lo) < min_ratio:
+                if mode == "left":
+                    f_lo = f_hi / min_ratio
+                else:
+                    f_hi = f_lo * min_ratio
+            new_c = max(150.0, min(5500.0, math.sqrt(f_lo * f_hi)))
+            new_bw = max(0.2, min(3.2, math.log2(f_hi / max(1.0, f_lo))))
+            self.slider_iso_freq.set(new_c)
+            self.slider_iso_bw.set(new_bw)
+            self.engine.set_bandpass_isolator(True, new_c, new_bw)
+            self.update_isolator_ui(active_preset="custom")
+            self.render_acoustic_analyzer()
+        else:
+            ratio = max(0.0, min(1.0, (event.x / w) + getattr(self, "_iso_drag_ratio_offset", 0.0)))
+            freq = max(150.0, min(5500.0, 80.0 * ((10000.0 / 80.0) ** ratio)))
+            self.slider_iso_freq.set(freq)
+            self.engine.set_bandpass_isolator(True, freq, float(self.slider_iso_bw.get()))
+            self.update_isolator_ui(active_preset="custom")
+            self.render_acoustic_analyzer()
+
+    def on_canvas_release_frequency(self, event):
+        self._iso_drag_mode = None
+        self.on_canvas_motion_frequency(event)
 
     def update_isolator_ui(self, active_preset=""):
         self.lbl_iso_freq.configure(text=f"中心 {int(self.slider_iso_freq.get())}Hz")
         self.lbl_iso_bw.configure(text=f"幅 {self.slider_iso_bw.get():.1f}")
         if not self.engine.isolator_enabled:
-            self.lbl_iso_status.configure(text="周波数の抜き出し: OFF（すべての帯域を再生中）", text_color=COLOR_TEXT_SUB)
+            self.lbl_iso_status.configure(text="周波数の抜き出し: OFF（グラフをクリックでON／黄色枠の端を引っ張って範囲調整）", text_color=COLOR_TEXT_SUB)
         else:
             c_hz = int(self.engine.isolator_center_hz)
             bw = self.engine.isolator_bw_oct
             lo, hi = int(c_hz / (2 ** (bw / 2))), int(c_hz * (2 ** (bw / 2)))
-            self.lbl_iso_status.configure(text=f"抜き出し中: {lo}〜{hi} Hz の音だけを再生（中心 {c_hz} Hz）",
+            self.lbl_iso_status.configure(text=f"抜き出し中: {lo}〜{hi} Hz（中心 {c_hz} Hz｜黄色枠の左右端をドラッグで幅伸縮）",
                                           text_color=COLOR_ISOLATOR_ON)
         for lbl, b in self.iso_preset_btns:
             if lbl == active_preset:
@@ -1317,6 +1421,68 @@ class DictaApp(ctk.CTk):
                 pts.extend([int(i / max(1, n - 1) * w), int(mid_y - wv * amp_y)])
             if len(pts) >= 4:
                 c.create_line(*pts, fill="#FFFFFF", width=2, smooth=True)
+
+        elif mode == "formant_peak":
+            # 倍音・ピーク（声帯フォルマント曲線＋ピークホールド残像＋対称エンベロープ）
+            # 1) 声の帯域ガイド背景
+            x_300 = self._freq_to_x(300, w)
+            x_1000 = self._freq_to_x(1000, w)
+            x_3500 = self._freq_to_x(3500, w)
+            c.create_rectangle(x_300, 0, x_1000, base, fill="#061626", outline="")
+            c.create_rectangle(x_1000, 0, x_3500, base, fill="#081C2E", outline="")
+            c.create_text((x_300 + x_1000) // 2, 12, text="母音・基本声帯域", fill="#3B6998", font=(FONT_UI, 9, "bold"))
+            c.create_text((x_1000 + x_3500) // 2, 12, text="子音・会話明瞭域", fill="#4885B8", font=(FONT_UI, 9, "bold"))
+
+            # 2) ピークホールド更新と連続スペクトル曲線
+            num_b = len(spectrum)
+            poly_pts = [0, base]
+            line_pts = []
+            peak_pts = []
+            max_idx = -1
+            max_val = 0.08
+            for i, val in enumerate(spectrum):
+                if playing:
+                    self.peak_hold[i] = max(val, self.peak_hold[i] * 0.94)
+                else:
+                    self.peak_hold[i] = max(val, self.peak_hold[i])
+                pk = self.peak_hold[i]
+                if pk > max_val:
+                    max_val = pk
+                    max_idx = i
+                px = int((i + 0.5) / num_b * w)
+                py = int(base - val * (base - 14))
+                pky = int(base - pk * (base - 14))
+                poly_pts.extend([px, py])
+                line_pts.extend([px, py])
+                peak_pts.extend([px, pky])
+            poly_pts.extend([w, base])
+            if len(poly_pts) >= 8:
+                c.create_polygon(*poly_pts, fill="#0A3A56", outline="")
+            if len(line_pts) >= 4:
+                c.create_line(*line_pts, fill=COLOR_NEON_CYAN, width=2, smooth=True)
+            if len(peak_pts) >= 4:
+                c.create_line(*peak_pts, fill="#FF5277", width=2, smooth=True)
+
+            # 3) 最大声紋ピーク周波数の自動スポット表示
+            if max_idx >= 0:
+                pk_x = int((max_idx + 0.5) / num_b * w)
+                pk_y = int(base - self.peak_hold[max_idx] * (base - 14))
+                pk_hz = int(self._x_to_freq(pk_x, w))
+                c.create_oval(pk_x - 4, pk_y - 4, pk_x + 4, pk_y + 4, fill="#FF5277", outline="#FFFFFF")
+                c.create_text(max(55, min(w - 55, pk_x)), max(24, pk_y - 12),
+                              text=f"▼ ピーク {pk_hz}Hz", fill="#FF809B", font=(FONT_MONO, 10, "bold"))
+
+            # 4) 上部に声の強弱エンベロープ（対称ミラーバー）を描画
+            env_y = int(base * 0.24)
+            env_amp = int(base * 0.16)
+            step_w = max(2, w / max(1, len(wave_pts)))
+            for i in range(0, len(wave_pts), 2):
+                amp = min(1.0, abs(wave_pts[i]) * 1.35)
+                if amp > 0.02:
+                    ex = int(i / max(1, len(wave_pts) - 1) * w)
+                    eh = max(1, int(amp * env_amp))
+                    c.create_line(ex, env_y - eh, ex, env_y + eh, fill="#A5F3FC", width=2)
+
         elif mode == "spectrogram":
             if playing:
                 self.spec_history.append([max(spectrum[i * 2], spectrum[i * 2 + 1]) for i in range(22)])
@@ -1341,9 +1507,14 @@ class DictaApp(ctk.CTk):
             xc = int(math.log10(c_hz / 80.0) / log_span * w)
             c.create_rectangle(x1, 2, x2, base, outline=COLOR_ISOLATOR_ON, width=3)
             c.create_line(xc, 2, xc, base, fill=COLOR_ISOLATOR_ON, width=2, dash=(4, 2))
-            c.create_text(max(60, min(w - 60, xc)), 16, text=f"抽出中: {int(c_hz)}Hz", fill=COLOR_ISOLATOR_ON, font=(FONT_UI, 12, "bold"))
+            # 左右の枠線を引っ張って伸縮できるグリップハンドルを描画
+            ym = base // 2
+            c.create_rectangle(x1 - 4, ym - 16, x1 + 4, ym + 16, fill=COLOR_ISOLATOR_ON, outline="#02050B", width=1)
+            c.create_rectangle(x2 - 4, ym - 16, x2 + 4, ym + 16, fill=COLOR_ISOLATOR_ON, outline="#02050B", width=1)
+            c.create_text(max(85, min(w - 85, xc)), 16,
+                          text=f"抽出中: {int(lo)}〜{int(hi)}Hz", fill=COLOR_ISOLATOR_ON, font=(FONT_UI, 12, "bold"))
         if not playing:
-            c.create_text(w // 2, base // 2, text="再生すると音の波形と周波数が表示されます\n（グラフをクリックするとその高さの音だけを抜き出せます）",
+            c.create_text(w // 2, base // 2, text="再生すると音の波形と周波数が表示されます\n（クリックで音の抜き出し／黄色い枠の左右端を引っ張ると範囲を伸縮できます）",
                           fill="#5B789E", font=(FONT_UI, 13, "bold"), justify="center")
         self._analyzer_idle_drawn = not playing
 
@@ -1381,6 +1552,7 @@ class DictaApp(ctk.CTk):
             self.loop_a = None
             self.loop_b = None
             self.spec_history.clear()
+            self.peak_hold = [0.0] * 44
             self._analyzer_idle_drawn = False
             self.config["last_file"] = path
             self.config["last_position"] = 0.0
@@ -1490,22 +1662,25 @@ class DictaApp(ctk.CTk):
         self.flash_status(f"時間コピー: {tag}", COLOR_PLAY_ACTIVE, 1800)
 
     def action_range_copy(self):
-        """A点からB点を『01:30:27,175 --> 01:30:37,420』形式でコピー"""
+        """A点からB点（未設定時は00:00:00〜現在位置）を『01:30:27,175 --> 01:30:37,420』形式でコピー"""
         prec = self.config.get("counter_precision", "sec")
+        pos = self.engine.get_position_seconds()
         if self.loop_a is not None and self.loop_b is not None:
             s_start = min(self.loop_a, self.loop_b)
             s_end = max(self.loop_a, self.loop_b)
+            note = ""
         elif self.loop_a is not None:
-            pos = self.engine.get_position_seconds()
             s_start = min(self.loop_a, pos)
             s_end = max(self.loop_a, pos)
+            note = "（A点〜現在位置）"
         elif self.loop_b is not None:
-            pos = self.engine.get_position_seconds()
             s_start = min(pos, self.loop_b)
             s_end = max(pos, self.loop_b)
+            note = "（現在位置〜B点）"
         else:
-            self.flash_status("区間コピー: 先にA点・B点を指定してください（A点のみ指定で現在位置までコピー）", COLOR_PAUSE_ACTIVE, 3500)
-            return
+            s_start = 0.0
+            s_end = pos
+            note = "（開始〜現在位置 ※A点・B点で区間指定可）"
 
         t1 = format_time_copy(s_start, prec)
         t2 = format_time_copy(s_end, prec)
@@ -1520,7 +1695,7 @@ class DictaApp(ctk.CTk):
             self.set_btn_kind(self.btn_copy_range, "accent")
             self.btn_copy_range.configure(text="⏱ 区間コピー")
         self._copy_range_restore_job = self.after(1200, _restore_range_btn)
-        self.flash_status(f"区間コピー: {range_str}", COLOR_PLAY_ACTIVE, 2500)
+        self.flash_status(f"区間コピー: {range_str} {note}".strip(), COLOR_PLAY_ACTIVE, 2500)
 
     # -------------------------------------------------------------------------
     # A-B loop
@@ -1770,276 +1945,292 @@ class DictaApp(ctk.CTk):
             self._analyzer_idle_drawn = False
 
     # -------------------------------------------------------------------------
-    # Settings dialog (直接キーボード入力キャプチャ & 選択式 の完全両立)
+    # Settings dialog (シンプルなダイレクトキー入力 & 大型タブ切替)
     # -------------------------------------------------------------------------
     def show_settings_dialog(self):
+        # 設定変更中に既存のOSホットキーにキー入力が横取りされないよう一時停止
+        try:
+            self.hotkey_mgr.stop()
+        except Exception:
+            pass
+
         dlg = ctk.CTkToplevel(self)
         dlg.title(f"Dicta {self.version_str} — 設定・キー設定")
-        dlg.geometry("960x820")
-        dlg.minsize(840, 680)
+        dlg.geometry("980x840")
+        dlg.minsize(860, 700)
         dlg.configure(fg_color=COLOR_BG_MAIN)
         dlg.transient(self)
         dlg.grab_set()
 
+        def close_without_save():
+            try:
+                self.setup_hotkeys()
+                self.hotkey_mgr.start()
+            except Exception:
+                pass
+            dlg.destroy()
+
+        dlg.protocol("WM_DELETE_WINDOW", close_without_save)
+
         bottom = ctk.CTkFrame(dlg, fg_color="#040811", height=64)
         bottom.pack(side="bottom", fill="x")
 
-        tabview = ctk.CTkTabview(dlg, fg_color=COLOR_BG_CARD, segmented_button_selected_color=COLOR_CYAN_MID,
-                                 segmented_button_selected_hover_color=COLOR_CYAN_DARK)
-        tabview.pack(fill="both", expand=True, padx=18, pady=(8, 6))
-        try:
-            tabview._segmented_button.configure(font=self.F(16))
-        except Exception:
-            pass
-        tab_keys = tabview.add("キー設定")
-        tab_general = tabview.add("再生・コピー・安全設定")
+        # --- 大きく分かりやすい大型タブ切り替えバー ---
+        tab_bar = ctk.CTkFrame(dlg, fg_color="#070E1C", corner_radius=12, border_width=2, border_color=COLOR_BORDER_SUBTLE)
+        tab_bar.pack(fill="x", padx=18, pady=(12, 6))
+        tab_bar.grid_columnconfigure(0, weight=1, uniform="settings_tab")
+        tab_bar.grid_columnconfigure(1, weight=1, uniform="settings_tab")
 
-        ctk.CTkLabel(tab_keys, text="各機能のショートカットキーを変更できます（キーボードを直接押すか、選択肢から指定できます）",
-                     font=self.F(16)).pack(anchor="w", pady=(4, 6))
+        content_area = ctk.CTkFrame(dlg, fg_color=COLOR_BG_CARD, corner_radius=14, border_width=2, border_color=COLOR_BORDER_SUBTLE)
+        content_area.pack(fill="both", expand=True, padx=18, pady=(2, 8))
+
+        tab_keys = ctk.CTkFrame(content_area, fg_color="transparent")
+        tab_general = ctk.CTkFrame(content_area, fg_color="transparent")
+
+        def switch_tab(which):
+            if which == "keys":
+                tab_general.pack_forget()
+                tab_keys.pack(fill="both", expand=True, padx=14, pady=10)
+                btn_tab_keys.configure(fg_color=COLOR_CYAN_MID, hover_color=COLOR_CYAN_DARK,
+                                       border_color=COLOR_NEON_CYAN, border_width=3, text_color="#FFFFFF")
+                btn_tab_gen.configure(fg_color="#0D182C", hover_color=COLOR_BG_BUTTON_HOVER,
+                                      border_color=COLOR_BORDER_SUBTLE, border_width=1, text_color=COLOR_TEXT_SUB)
+            else:
+                tab_keys.pack_forget()
+                tab_general.pack(fill="both", expand=True, padx=14, pady=10)
+                btn_tab_gen.configure(fg_color=COLOR_CYAN_MID, hover_color=COLOR_CYAN_DARK,
+                                      border_color=COLOR_NEON_CYAN, border_width=3, text_color="#FFFFFF")
+                btn_tab_keys.configure(fg_color="#0D182C", hover_color=COLOR_BG_BUTTON_HOVER,
+                                       border_color=COLOR_BORDER_SUBTLE, border_width=1, text_color=COLOR_TEXT_SUB)
+
+        btn_tab_keys = ctk.CTkButton(
+            tab_bar, text="⌨  キー設定（ショートカット）", command=lambda: switch_tab("keys"),
+            height=52, corner_radius=10, font=self.F(20)
+        )
+        btn_tab_keys.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
+
+        btn_tab_gen = ctk.CTkButton(
+            tab_bar, text="⚙  再生・コピー・安全設定", command=lambda: switch_tab("general"),
+            height=52, corner_radius=10, font=self.F(20)
+        )
+        btn_tab_gen.grid(row=0, column=1, sticky="ew", padx=6, pady=6)
+
+        # --- キーイベント解析ヘルパー（何でも押したキーがそのまま入る） ---
+        MOD_KEYCODES = {
+            16: "Shift", 160: "Shift", 161: "Shift",
+            17: "Ctrl",  162: "Ctrl",  163: "Ctrl",
+            18: "Alt",   164: "Alt",   165: "Alt",
+            91: "Win",   92: "Win",
+        }
+        MOD_KEYSYMS = {
+            "SHIFT_L": "Shift", "SHIFT_R": "Shift",
+            "CONTROL_L": "Ctrl", "CONTROL_R": "Ctrl",
+            "ALT_L": "Alt", "ALT_R": "Alt",
+            "SUPER_L": "Win", "SUPER_R": "Win", "WIN_L": "Win", "WIN_R": "Win",
+        }
+
+        def process_key_press(event, state):
+            """
+            押されたキーイベントを受け取り、(has_main, raw_hotkey_str, display_str) を返す。
+            単体キー、同時押し、片手マクロキーボード、順不同の1キーずつ入力のすべてに完全対応。
+            """
+            kc = getattr(event, "keycode", 0)
+            sym = (getattr(event, "keysym", "") or "").upper()
+
+            if state.get("fresh", True):
+                state["mods"].clear()
+                state["main"] = ""
+                state["fresh"] = False
+
+            s, c, a = get_current_modifiers()
+            if s: state["mods"].add("Shift")
+            if c: state["mods"].add("Ctrl")
+            if a: state["mods"].add("Alt")
+
+            if kc in MOD_KEYCODES or sym in MOD_KEYSYMS:
+                m_name = MOD_KEYCODES.get(kc) or MOD_KEYSYMS.get(sym)
+                if m_name:
+                    state["mods"].add(m_name)
+            else:
+                if kc in VK_TO_NAME:
+                    main_k = VK_TO_NAME[kc]
+                elif sym in VK_KEYS:
+                    main_k = VK_TO_NAME.get(VK_KEYS[sym], sym)
+                elif len(sym) == 1:
+                    main_k = sym.upper()
+                elif kc > 0:
+                    main_k = f"VK{kc}"
+                else:
+                    return False, "", ""
+                state["main"] = main_k
+
+            ordered = [m for m in ("Shift", "Ctrl", "Alt", "Win") if m in state["mods"]]
+            if state["main"]:
+                ordered.append(state["main"])
+            if not ordered:
+                return False, "", ""
+            raw_str = "+".join(ordered)
+            _, _, canon = parse_hotkey_string(raw_str)
+            disp = canon if canon else " + ".join(ordered)
+            return bool(state["main"]), raw_str, disp
+
+        # --- キー設定タブの中身 ---
+        ctk.CTkLabel(
+            tab_keys,
+            text="変更したい機能のキー枠（または「変更」）をクリックして、そのままキーボードを押してください。",
+            font=self.F(16), text_color=COLOR_TEXT_MAIN
+        ).pack(anchor="w", pady=(2, 6))
 
         scroll = ctk.CTkScrollableFrame(tab_keys, fg_color="#070C18")
-        scroll.pack(fill="both", expand=True, padx=4, pady=4)
+        scroll.pack(fill="both", expand=True, padx=2, pady=2)
 
         current_hotkeys = dict(self.config.get("hotkeys", {}))
         key_vars = {}
+        key_btns = {}
         _ok, fb = self.hotkey_mgr.get_status()
         fb_actions = {a for a, _ in fb}
+        active_inline_ak = [None]
+        inline_state = {"mods": set(), "main": "", "fresh": True}
 
-        def edit_key(action_key):
+        def apply_hotkey_assignment(target_ak, new_raw_str, parent_win=dlg):
+            if not new_raw_str:
+                current_hotkeys[target_ak] = ""
+                key_vars[target_ak].set("（未設定）")
+                return True
+            _, _, canon = parse_hotkey_string(new_raw_str)
+            for other, v in current_hotkeys.items():
+                if other != target_ak and v and parse_hotkey_string(v)[2] == canon:
+                    if not messagebox.askyesno(
+                        "重複の確認",
+                        f"「{canon}」は既に「{HOTKEY_NAMES.get(other, other)}」に割り当てられています。\nそちらを解除して、この機能に割り当てますか？",
+                        parent=parent_win
+                    ):
+                        return False
+                    current_hotkeys[other] = ""
+                    key_vars[other].set("（未設定）")
+            current_hotkeys[target_ak] = new_raw_str
+            key_vars[target_ak].set(canon or new_raw_str)
+            return True
+
+        def stop_inline_capture():
+            prev_ak = active_inline_ak[0]
+            active_inline_ak[0] = None
+            if prev_ak and prev_ak in key_btns:
+                _, _, canon = parse_hotkey_string(current_hotkeys.get(prev_ak, ""))
+                key_vars[prev_ak].set(canon or "（未設定）")
+                key_btns[prev_ak].configure(fg_color="#091426", border_color=COLOR_BORDER_SUBTLE, text_color=COLOR_NEON_CYAN)
+
+        def start_inline_capture(action_key):
+            stop_inline_capture()
+            active_inline_ak[0] = action_key
+            inline_state["mods"].clear()
+            inline_state["main"] = ""
+            inline_state["fresh"] = True
+            key_vars[action_key].set("▶ キーを押してください...")
+            key_btns[action_key].configure(fg_color="#0B2922", border_color=COLOR_PLAY_ACTIVE, text_color=COLOR_PLAY_ACTIVE)
+            dlg.focus_set()
+
+        def on_dlg_keypress(event):
+            ak = active_inline_ak[0]
+            if not ak:
+                return
+            _has_main, raw_str, disp = process_key_press(event, inline_state)
+            if raw_str:
+                apply_hotkey_assignment(ak, raw_str, parent_win=dlg)
+            return "break"
+
+        dlg.bind("<KeyPress>", on_dlg_keypress)
+
+        def edit_key_dialog(action_key):
+            """「変更」ボタンを押したときの、押したキーがそのまま入るだけの超シンプル画面"""
+            stop_inline_capture()
             ed = ctk.CTkToplevel(dlg)
-            ed.title(f"キー変更: {HOTKEY_NAMES.get(action_key, action_key)}")
-            ed.geometry("620x480")
+            ed.title(f"キー入力: {HOTKEY_NAMES.get(action_key, action_key)}")
+            ed.geometry("540x290")
+            ed.resizable(False, False)
             ed.configure(fg_color=COLOR_BG_MAIN)
             ed.transient(dlg)
             ed.grab_set()
+
             p = ctk.CTkFrame(ed, fg_color="transparent")
-            p.pack(fill="both", expand=True, padx=24, pady=16)
+            p.pack(fill="both", expand=True, padx=24, pady=20)
 
-            ctk.CTkLabel(p, text=f"機能: {HOTKEY_NAMES.get(action_key, action_key)}", font=self.F(17)).pack(anchor="w", pady=(0, 4))
-            cur = current_hotkeys.get(action_key, "")
-            _, _, canon_cur = parse_hotkey_string(cur)
-            lbl_cur = ctk.CTkLabel(p, text=f"現在の設定: {canon_cur or '（なし）'}", font=self.F(16), text_color=COLOR_NEON_CYAN)
-            lbl_cur.pack(anchor="w", pady=(0, 8))
+            ctk.CTkLabel(p, text=HOTKEY_NAMES.get(action_key, action_key), font=self.F(19), text_color=COLOR_TEXT_MAIN).pack(anchor="w")
+            ctk.CTkLabel(p, text="キーボード（または片手キーボード）で使いたいキーを押してください:",
+                         font=self.F(14), text_color=COLOR_TEXT_SUB).pack(anchor="w", pady=(4, 12))
 
-            # --- 状態管理（累積・順次追加方式） ---
-            current_mods = set()
-            current_main = ["（なし）"]
+            cur_raw = current_hotkeys.get(action_key, "")
+            _, _, cur_canon = parse_hotkey_string(cur_raw)
+            captured_raw = [cur_raw]
+            dlg_state = {"mods": set(), "main": "", "fresh": True}
 
-            # 初期値の分解
-            for pt in [x.strip() for x in cur.replace(" ", "").split("+") if x.strip()]:
-                u = pt.upper()
-                if u == "SHIFT": current_mods.add("Shift")
-                elif u == "CTRL": current_mods.add("Ctrl")
-                elif u == "ALT": current_mods.add("Alt")
-                else: current_main[0] = pt.upper()
-
-            # --- 1. 順番に追加できるキーボード直接入力 ＆ クイック追加ボタン ---
-            cap_box = ctk.CTkFrame(p, fg_color="#071224", corner_radius=10, border_width=2, border_color="#1E3A5F")
-            cap_box.pack(fill="x", pady=(0, 10), ipady=4)
-
-            lbl_hint = ctk.CTkLabel(cap_box, text="⌨ キーボードを押すか、ボタンをクリックして順番に追加できます:",
-                                    font=self.F(14), text_color=COLOR_TEXT_SUB)
-            lbl_hint.pack(anchor="w", padx=12, pady=(6, 2))
-
-            # 大きく見やすい現在の組み合わせプレビュー
-            lbl_combo_preview = ctk.CTkLabel(
-                cap_box,
-                text="[ ここをクリックしてキーボードを押す ]",
-                font=self.F(17, bold=True, mono=True),
-                height=42,
-                fg_color="#0C1B33",
-                corner_radius=8,
-                text_color=COLOR_PLAY_ACTIVE
+            box = ctk.CTkLabel(
+                p,
+                text=cur_canon if cur_canon else "（キーを押してください）",
+                font=self.F(24, bold=True, mono=True),
+                height=72,
+                fg_color="#08162B",
+                corner_radius=12,
+                text_color=COLOR_PLAY_ACTIVE if cur_canon else COLOR_TEXT_SUB
             )
-            lbl_combo_preview.pack(fill="x", padx=12, pady=(2, 6))
+            box.pack(fill="x", pady=(0, 18))
 
-            # クイック追加ボタン列（ポチポチ押して順次追加できる）
-            btn_row = ctk.CTkFrame(cap_box, fg_color="transparent")
-            btn_row.pack(fill="x", padx=12, pady=(0, 6))
-
-            # --- 2. 手動選択エリア（チェックボックス ＆ ドロップダウン） ---
-            ctk.CTkLabel(p, text="またはチェックボックスと一覧から手動で選択:", font=self.F(14), text_color=COLOR_TEXT_SUB).pack(anchor="w", pady=(2, 4))
-
-            mf = ctk.CTkFrame(p, fg_color="transparent")
-            mf.pack(fill="x", pady=2)
-            chks = {}
-            for m in ("Shift", "Ctrl", "Alt"):
-                cb = ctk.CTkCheckBox(mf, text=m, width=95, font=self.F(16))
-                cb.pack(side="left", padx=4)
-                if m in current_mods:
-                    cb.select()
-                chks[m] = cb
-
-            kr = ctk.CTkFrame(p, fg_color="transparent")
-            kr.pack(fill="x", pady=6)
-            ctk.CTkLabel(kr, text="キー:", font=self.F(16)).pack(side="left", padx=4)
-            keys_list = ["（なし）"] + [f"F{i}" for i in range(1, 13)] + list("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + \
-                list("0123456789") + ["SPACE", "UP", "DOWN", "LEFT", "RIGHT", "TAB", "ENTER", "HOME", "END", "PGUP", "PGDN", "INS", "DEL"]
-
-            ok_ = ctk.CTkOptionMenu(kr, values=keys_list, width=170, height=36, font=self.F(16), dropdown_font=self.F(15),
-                                    fg_color=COLOR_BG_BUTTON, button_color=COLOR_CYAN_MID)
-            ok_.pack(side="left", padx=8)
-            ok_.set(current_main[0] if current_main[0] in keys_list else "（なし）")
-
-            # UIの同期関数
-            def sync_ui():
-                parts = []
-                for m in ("Shift", "Ctrl", "Alt"):
-                    if m in current_mods:
-                        parts.append(m)
-                        chks[m].select()
-                    else:
-                        chks[m].deselect()
-                if current_main[0] and current_main[0] != "（なし）":
-                    parts.append(current_main[0])
-                    ok_.set(current_main[0])
-                else:
-                    ok_.set("（なし）")
-
-                if parts:
-                    lbl_combo_preview.configure(
-                        text=" + ".join(parts),
-                        text_color=COLOR_PLAY_ACTIVE,
-                        fg_color="#0C1B33"
-                    )
-                else:
-                    lbl_combo_preview.configure(
-                        text="（キーを押すか、下のボタンで追加してください）",
-                        text_color=COLOR_TEXT_SUB,
-                        fg_color="#0C1B33"
-                    )
-
-            # チェックボックスやメニューを手動変更した時
-            for m in ("Shift", "Ctrl", "Alt"):
-                def _chk_cmd(mod=m):
-                    if chks[mod].get():
-                        current_mods.add(mod)
-                    else:
-                        current_mods.discard(mod)
-                    sync_ui()
-                chks[m].configure(command=_chk_cmd)
-
-            def _menu_cmd(val):
-                current_main[0] = val
-                sync_ui()
-            ok_.configure(command=_menu_cmd)
-
-            # ボタンで順次追加
-            def add_modifier(m):
-                current_mods.add(m)
-                sync_ui()
-
-            def clear_all():
-                current_mods.clear()
-                current_main[0] = "（なし）"
-                sync_ui()
-
-            def remove_last():
-                if current_main[0] != "（なし）":
-                    current_main[0] = "（なし）"
-                elif "Alt" in current_mods:
-                    current_mods.remove("Alt")
-                elif "Ctrl" in current_mods:
-                    current_mods.remove("Ctrl")
-                elif "Shift" in current_mods:
-                    current_mods.remove("Shift")
-                sync_ui()
-
-            # クイックボタン配置
-            self.btn(btn_row, "+ Shift", lambda: add_modifier("Shift"), size=14, height=32, width=80, kind="accent").pack(side="left", padx=2)
-            self.btn(btn_row, "+ Ctrl", lambda: add_modifier("Ctrl"), size=14, height=32, width=80, kind="accent").pack(side="left", padx=2)
-            self.btn(btn_row, "+ Alt", lambda: add_modifier("Alt"), size=14, height=32, width=80, kind="accent").pack(side="left", padx=2)
-            self.btn(btn_row, "⌫ 1つ消す", remove_last, size=14, height=32, width=95, kind="normal").pack(side="left", padx=6)
-            self.btn(btn_row, "全消去", clear_all, size=14, height=32, width=75, kind="danger").pack(side="left", padx=2)
-
-            # キーボード入力イベント
-            def on_key_press(event):
-                sym = event.keysym.upper()
-
-                # 修飾キー
-                if sym in ("SHIFT_L", "SHIFT_R"):
-                    current_mods.add("Shift")
-                    sync_ui()
-                    return "break"
-                elif sym in ("CONTROL_L", "CONTROL_R"):
-                    current_mods.add("Ctrl")
-                    sync_ui()
-                    return "break"
-                elif sym in ("ALT_L", "ALT_R"):
-                    current_mods.add("Alt")
-                    sync_ui()
-                    return "break"
-                elif sym in ("BACKSPACE",):
-                    remove_last()
-                    return "break"
-                elif sym in ("ESCAPE", "DELETE"):
-                    clear_all()
-                    return "break"
-
-                # 同時押しされている修飾キーも拾う
-                s, c, a = get_current_modifiers()
-                if s: current_mods.add("Shift")
-                if c: current_mods.add("Ctrl")
-                if a: current_mods.add("Alt")
-
-                key_map = {
-                    "RETURN": "ENTER", "KP_ENTER": "ENTER", "TAB": "TAB", "SPACE": "SPACE",
-                    "PRIOR": "PGUP", "NEXT": "PGDN", "INSERT": "INS", "UP": "UP",
-                    "DOWN": "DOWN", "LEFT": "LEFT", "RIGHT": "RIGHT"
-                }
-                main_k = key_map.get(sym, sym)
-                if len(main_k) == 1 and main_k.isalpha():
-                    main_k = main_k.upper()
-
-                if main_k in keys_list and main_k != "（なし）":
-                    current_main[0] = main_k
-                    sync_ui()
+            def on_ed_key(event):
+                _has_main, raw_str, disp = process_key_press(event, dlg_state)
+                if raw_str:
+                    captured_raw[0] = raw_str
+                    box.configure(text=disp, text_color=COLOR_PLAY_ACTIVE)
                 return "break"
 
-            ed.bind("<KeyPress>", on_key_press)
-            lbl_combo_preview.bind("<Button-1>", lambda e: ed.focus_set())
-            sync_ui()
+            def clear_ed():
+                captured_raw[0] = ""
+                dlg_state["mods"].clear()
+                dlg_state["main"] = ""
+                dlg_state["fresh"] = True
+                box.configure(text="（キーを押してください）", text_color=COLOR_TEXT_SUB)
 
-            def save_key():
-                k = current_main[0]
-                if not current_mods and (k == "（なし）" or not k):
-                    current_hotkeys[action_key] = ""
-                    key_vars[action_key].set("（未設定）")
-                else:
-                    parts = [m for m in ("Shift", "Ctrl", "Alt") if m in current_mods]
-                    if k and k != "（なし）":
-                        parts.append(k)
-                    new_str = "+".join(parts)
-                    _, _, canon = parse_hotkey_string(new_str)
-                    for other, v in current_hotkeys.items():
-                        if other != action_key and v and parse_hotkey_string(v)[2] == canon:
-                            if not messagebox.askyesno("重複の確認", f"{canon} は「{HOTKEY_NAMES.get(other, other)}」に使われています。\nそちらを解除して、この機能に割り当てますか？", parent=ed):
-                                return
-                            current_hotkeys[other] = ""
-                            key_vars[other].set("（未設定）")
-                    current_hotkeys[action_key] = new_str
-                    key_vars[action_key].set(canon)
-                ed.destroy()
+            def commit_ed():
+                if apply_hotkey_assignment(action_key, captured_raw[0], parent_win=ed):
+                    ed.destroy()
+
+            ed.bind("<KeyPress>", on_ed_key)
+            box.bind("<Button-1>", lambda e: clear_ed())
+            ed.after(50, ed.focus_force)
 
             br = ctk.CTkFrame(p, fg_color="transparent")
-            br.pack(side="bottom", pady=4)
-            self.btn(br, "この設定にする", save_key, size=15, height=38, width=140, kind="primary").pack(side="left", padx=6)
-            self.btn(br, "閉じる", ed.destroy, size=15, height=38, width=90).pack(side="left", padx=6)
+            br.pack(side="bottom", fill="x")
+            self.btn(br, "決定", commit_ed, size=16, height=42, width=150, kind="play").pack(side="right", padx=(6, 0))
+            self.btn(br, "キャンセル", ed.destroy, size=15, height=42, width=110).pack(side="right", padx=6)
+            self.btn(br, "クリア（解除）", clear_ed, size=15, height=42, width=130, kind="danger").pack(side="left")
 
         for i, (action_key, action_name) in enumerate(HOTKEY_NAMES.items()):
             row = ctk.CTkFrame(scroll, fg_color="#111C33" if i % 2 == 0 else "#0B1324", corner_radius=8)
             row.pack(fill="x", pady=2, padx=4)
-            ctk.CTkLabel(row, text=action_name, width=320, anchor="w", font=self.F(16)).pack(side="left", padx=10, pady=6)
+            ctk.CTkLabel(row, text=action_name, width=310, anchor="w", font=self.F(16)).pack(side="left", padx=10, pady=6)
             _, _, canon = parse_hotkey_string(current_hotkeys.get(action_key, ""))
             var = tk.StringVar(value=canon or "（未設定）")
             key_vars[action_key] = var
-            ctk.CTkLabel(row, textvariable=var, width=220, anchor="w", font=self.F(15, mono=True),
-                         text_color=COLOR_NEON_CYAN).pack(side="left", padx=4)
+
+            # クリックするとその場で直接キー入力できるボックスボタン
+            kb_btn = ctk.CTkButton(
+                row, textvariable=var, width=250, height=36, corner_radius=6,
+                fg_color="#091426", hover_color="#13284C", border_width=2, border_color=COLOR_BORDER_SUBTLE,
+                font=self.F(15, mono=True), text_color=COLOR_NEON_CYAN,
+                command=lambda ak=action_key: start_inline_capture(ak)
+            )
+            kb_btn.pack(side="left", padx=6, pady=4)
+            key_btns[action_key] = kb_btn
+
             if action_key in fb_actions:
-                ctk.CTkLabel(row, text="[他アプリと重複]", font=self.F(13), text_color=COLOR_PAUSE_ACTIVE).pack(side="left", padx=4)
-            self.btn(row, "変更", lambda ak=action_key: edit_key(ak), size=14, height=32, width=70, kind="primary", radius=6).pack(side="right", padx=6)
+                ctk.CTkLabel(row, text="[重複]", font=self.F(13), text_color=COLOR_PAUSE_ACTIVE).pack(side="left", padx=4)
+
+            self.btn(row, "解除", lambda ak=action_key: (stop_inline_capture(), apply_hotkey_assignment(ak, "")),
+                     size=14, height=32, width=64, kind="danger", radius=6).pack(side="right", padx=(2, 6))
+            self.btn(row, "変更", lambda ak=action_key: edit_key_dialog(ak),
+                     size=14, height=32, width=70, kind="primary", radius=6).pack(side="right", padx=2)
 
         def reset_defaults():
+            stop_inline_capture()
             if messagebox.askyesno("確認", "ショートカットキーを初期設定（Shift+Ctrl+Alt+W/E/Q/Z/X/A など）に戻しますか？", parent=dlg):
                 current_hotkeys.clear()
                 current_hotkeys.update(DEFAULT_CONFIG["hotkeys"])
@@ -2099,7 +2290,11 @@ class DictaApp(ctk.CTk):
         c_beep = chk_row("区間リピートで折り返すときに通知音を鳴らす", self.config.get("loop_beep", False))
         c_max = chk_row("起動時に全画面（最大化）で表示する", self.config.get("start_maximized", True))
 
+        # 初期表示タブをセット
+        switch_tab("keys")
+
         def save_and_close():
+            stop_inline_capture()
             try:
                 self.config["auto_rewind_sec"] = max(0.0, float(e_rew.get()))
                 self.config["jump_rewind_sec"] = max(0.1, float(e_jr.get()))
@@ -2118,13 +2313,14 @@ class DictaApp(ctk.CTk):
             self.config["hotkeys"] = current_hotkeys
             self.refresh_jump_labels()
             self.setup_hotkeys()
+            self.hotkey_mgr.start()
             self.save_config()
             dlg.destroy()
             self.after(600, self.report_hotkey_status)
             self.flash_status("設定とショートカットキーを保存しました", COLOR_PLAY_ACTIVE, 3000)
 
         self.btn(bottom, "設定を保存して閉じる", save_and_close, size=16, height=42, width=210, kind="play").pack(side="right", padx=16, pady=10)
-        self.btn(bottom, "キャンセル", dlg.destroy, size=15, height=42, width=120).pack(side="right", padx=6, pady=10)
+        self.btn(bottom, "キャンセル", close_without_save, size=15, height=42, width=120).pack(side="right", padx=6, pady=10)
 
     # -------------------------------------------------------------------------
     def on_close(self):

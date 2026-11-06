@@ -1963,9 +1963,9 @@ class DictaApp(ctk.CTk):
     def show_custom_confirm_dialog(self, title, icon, heading, message, confirm_text, cancel_text="キャンセル", kind="danger", on_confirm=None, on_cancel=None):
         dlg = ctk.CTkToplevel(self)
         dlg.title(title)
-        dlg_w, dlg_h = 820, 420
+        dlg_w, dlg_h = 980, 480
         dlg.geometry(f"{dlg_w}x{dlg_h}")
-        dlg.minsize(740, 380)
+        dlg.minsize(860, 420)
         dlg.configure(fg_color="#0A1220")
         dlg.transient(self)
         dlg.grab_set()
@@ -1980,23 +1980,35 @@ class DictaApp(ctk.CTk):
 
         border_c = "#EF4444" if kind == "danger" else ("#F59E0B" if kind == "warning" else COLOR_NEON_CYAN)
         card = ctk.CTkFrame(dlg, fg_color=COLOR_BG_MAIN, corner_radius=16, border_width=2, border_color=border_c)
-        card.pack(fill="both", expand=True, padx=16, pady=16)
+        card.pack(fill="both", expand=True, padx=20, pady=20)
 
         # アイコン ＋ 見出し
         hdr = ctk.CTkFrame(card, fg_color="transparent")
-        hdr.pack(fill="x", padx=28, pady=(22, 10))
+        hdr.pack(fill="x", padx=36, pady=(26, 12))
         ctk.CTkLabel(hdr, text=icon, font=self.F(36)).pack(side="left", padx=(0, 16))
         ctk.CTkLabel(hdr, text=heading, font=self.F(24, bold=True), text_color=COLOR_TEXT_MAIN).pack(side="left")
 
         # ボタン列を先に下部にパック（文字とボタンの重なり・文字切れを物理的に完全防止）
         btn_row = ctk.CTkFrame(card, fg_color="transparent")
-        btn_row.pack(fill="x", padx=28, pady=(0, 24), side="bottom")
+        btn_row.pack(fill="x", padx=36, pady=(0, 26), side="bottom")
 
-        # 本文（文字を特大18pt・行間ゆったり・文字切れ完全防止）
-        ctk.CTkLabel(
+        # 本文（左右余白を広く確保し、DPIスケーリングに追従して自動折り返し）
+        lbl_msg = ctk.CTkLabel(
             card, text=message, font=self.F(18, bold=False), text_color=COLOR_TEXT_SUB,
-            justify="left", wraplength=720
-        ).pack(fill="both", expand=True, padx=28, pady=(6, 16))
+            justify="left", anchor="w"
+        )
+        lbl_msg.pack(fill="both", expand=True, padx=36, pady=(8, 16))
+
+        def _update_msg_wrap(event):
+            try:
+                factor = lbl_msg._get_widget_scaling()
+                avail_phys = max(200, event.width - int(80 * (factor / 1.28)))
+                virtual_val = int(avail_phys / factor)
+                lbl_msg.configure(wraplength=virtual_val)
+            except Exception:
+                pass
+
+        card.bind("<Configure>", _update_msg_wrap)
 
         def do_cancel():
             try:
@@ -2040,7 +2052,11 @@ class DictaApp(ctk.CTk):
             title="Dicta — しおり全消去",
             icon="🗑️",
             heading="しおりの一括消去",
-            message=f"現在開いている音声ファイルに記録されている、すべてのしおり（合計 {count} 箇所）を完全に消去します。\n\n※この操作を実行すると元に戻すことはできません。本当に消去してよろしいですか？",
+            message=(
+                f"現在開いている音声ファイルに記録されている、すべてのしおり（合計 {count} 箇所）を完全に消去します。\n\n"
+                "※この操作を実行すると元に戻すことはできません。\n"
+                "本当に消去してよろしいですか？"
+            ),
             confirm_text="🗑️ すべて消去する",
             cancel_text="キャンセル",
             kind="danger",
@@ -2068,7 +2084,11 @@ class DictaApp(ctk.CTk):
             title="Dicta — 音量ブースト（限界突破）警告",
             icon="⚠️",
             heading="音量ブースト（限界突破）の注意",
-            message="100%を超える音量ブースト（最大200%）は、極小音量の録音や聞き取りにくい声の増幅に有効ですが、音割れ（クリッピング）や突発的な大音量により、耳やスピーカー・イヤホンに負担をかける恐れがあります。\n\n限界突破ラインを超えて音量を引き上げますか？",
+            message=(
+                "100%を超える音量ブースト（最大200%）は、極小音量の録音や聞き取りにくい声の増幅に有効ですが、\n"
+                "音割れ（クリッピング）や突発的な大音量により、耳やスピーカー・イヤホンに負担をかける恐れがあります。\n\n"
+                "限界突破ラインを超えて音量を引き上げますか？"
+            ),
             confirm_text="💥 了解してブーストを許可",
             cancel_text="100%に留める",
             kind="warning",

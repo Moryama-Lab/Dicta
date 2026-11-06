@@ -635,6 +635,7 @@ class DictaApp(ctk.CTk):
         self._iso_drag_mode = None
         self._iso_drag_fixed_hz = 1200.0
         self._iso_drag_ratio_offset = 0.0
+        self.boost_warning_dismissed = False
 
         step = lambda: self.config.get("speed_step", 0.05)
         self.action_dispatch = {
@@ -666,7 +667,10 @@ class DictaApp(ctk.CTk):
         self.apply_eq_gains(self.config.get("eq_gains", [-4.0, -1.0, 2.0, 6.0, 3.0, -2.0]))
         self.set_speed(self.config.get("speed", 1.0))
         self.set_pitch(self.config.get("pitch", 0.0))
-        self.set_volume_ui(self.config.get("volume", 0.9))
+        init_vol = self.config.get("volume", 0.9)
+        if init_vol > 1.0:
+            self.boost_warning_dismissed = True
+        self.set_volume_ui(init_vol, check_boost=False)
 
         # Hotkeys
         self.hotkey_mgr = HotkeyManager(debounce_ms=45)
@@ -729,6 +733,7 @@ class DictaApp(ctk.CTk):
         "sub_head": dict(fg_color="#24143B", hover_color="#381E5E", border_color="#A855F7", text_color="#F3E8FF"),
         "sub_bm": dict(fg_color="#2A2006", hover_color="#423208", border_color="#FFB300", text_color="#FDE047"),
         "sub_del": dict(fg_color="#2A1018", hover_color="#401824", border_color="#E11D48", text_color="#FDA4AF"),
+        "warning": dict(fg_color="#451A03", hover_color="#78350F", border_color="#F59E0B", text_color="#FEF3C7"),
     }
 
     def btn(self, parent, text, cmd, size=18, height=48, width=None, kind="normal", radius=10):
@@ -1075,24 +1080,25 @@ class DictaApp(ctk.CTk):
             s.set(gain)
             self.eq_sliders.append(s)
 
-        # 4. イコライザー直下のマスター音量バー
+        # 4. イコライザー直下の音量バー（最大200%ブースト・限界突破安全設計）
         vol_frame = ctk.CTkFrame(eq, fg_color="#071020", corner_radius=10, border_width=1, border_color="#1E3A5F")
         vol_frame.pack(fill="x", padx=12, pady=(2, 8))
 
         vt = ctk.CTkFrame(vol_frame, fg_color="transparent")
         vt.pack(fill="x", padx=12, pady=(6, 2))
-        ctk.CTkLabel(vt, text="マスター音量", font=self.F(16), text_color=COLOR_TEXT_MAIN).pack(side="left")
+        ctk.CTkLabel(vt, text="音量", font=self.F(16), text_color=COLOR_TEXT_MAIN).pack(side="left")
         self.lbl_vol_val = ctk.CTkLabel(vt, text="90%", font=self.F(18, mono=True), text_color=COLOR_NEON_CYAN)
         self.lbl_vol_val.pack(side="left", padx=10)
-        ctk.CTkLabel(vt, text="（マウスホイールで1%微調整）", font=self.F(13, bold=False), text_color=COLOR_TEXT_SUB).pack(side="right")
+        self.lbl_vol_badge = ctk.CTkLabel(vt, text="（マウスホイールで1%微調整）", font=self.F(13, bold=False), text_color=COLOR_TEXT_SUB)
+        self.lbl_vol_badge.pack(side="right")
 
         vr = ctk.CTkFrame(vol_frame, fg_color="transparent")
         vr.pack(fill="x", padx=8, pady=(0, 6))
         self.btn(vr, "－", lambda: self.adjust_volume(-0.01), size=18, height=36, width=44, radius=6).pack(side="left")
         self.slider_vol = ctk.CTkSlider(
-            vr, from_=0, to=100, number_of_steps=200, height=24,
+            vr, from_=0, to=200, number_of_steps=400, height=24,
             fg_color="#1B2E4B", progress_color=COLOR_NEON_CYAN, button_color="#FFFFFF",
-            button_hover_color=COLOR_NEON_CYAN, command=lambda v: self.on_volume_change(float(v) / 100.0))
+            button_hover_color=COLOR_NEON_CYAN, command=lambda v: self.on_slider_vol_command(float(v) / 100.0))
         self.slider_vol.pack(side="left", fill="x", expand=True, padx=8)
         self.slider_vol.bind("<MouseWheel>", lambda e: self.adjust_volume(0.01 if e.delta > 0 else -0.01))
         self.btn(vr, "＋", lambda: self.adjust_volume(0.01), size=18, height=36, width=44, radius=6).pack(side="left")
@@ -1793,16 +1799,110 @@ class DictaApp(ctk.CTk):
         self.save_config()
         self.flash_status(f"しおりを削除しました: {format_time(target_sec, False)}", COLOR_TEXT_SUB, 2000)
 
+    # -------------------------------------------------------------------------
+    # Custom Dicta Modal Dialogs (高品位ダークモーダル)
+    # -------------------------------------------------------------------------
+    def show_custom_confirm_dialog(self, title, icon, heading, message, confirm_text, cancel_text="キャンセル", kind="danger", on_confirm=None, on_cancel=None):
+        dlg = ctk.CTkToplevel(self)
+        dlg.title(title)
+        dlg.geometry("540x260")
+        dlg.resizable(False, False)
+        dlg.configure(fg_color="#0A1220")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        try:
+            self.update_idletasks()
+            rx = self.winfo_x() + (self.winfo_width() - 540) // 2
+            ry = self.winfo_y() + (self.winfo_height() - 260) // 2
+            dlg.geometry(f"+{max(0, rx)}+{max(0, ry)}")
+        except Exception:
+            pass
+
+        border_c = "#EF4444" if kind == "danger" else ("#F59E0B" if kind == "warning" else COLOR_NEON_CYAN)
+        card = ctk.CTkFrame(dlg, fg_color=COLOR_BG_MAIN, corner_radius=14, border_width=2, border_color=border_c)
+        card.pack(fill="both", expand=True, padx=12, pady=12)
+
+        hdr = ctk.CTkFrame(card, fg_color="transparent")
+        hdr.pack(fill="x", padx=22, pady=(16, 6))
+        ctk.CTkLabel(hdr, text=icon, font=self.F(28)).pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(hdr, text=heading, font=self.F(19, bold=True), text_color=COLOR_TEXT_MAIN).pack(side="left")
+
+        ctk.CTkLabel(card, text=message, font=self.F(14, bold=False), text_color=COLOR_TEXT_SUB,
+                     justify="left", wraplength=480).pack(fill="x", padx=24, pady=(2, 14))
+
+        btn_row = ctk.CTkFrame(card, fg_color="transparent")
+        btn_row.pack(fill="x", padx=22, pady=(0, 16), side="bottom")
+
+        def do_cancel():
+            try:
+                dlg.destroy()
+            except Exception:
+                pass
+            if on_cancel:
+                on_cancel()
+
+        def do_confirm():
+            try:
+                dlg.destroy()
+            except Exception:
+                pass
+            if on_confirm:
+                on_confirm()
+
+        dlg.protocol("WM_DELETE_WINDOW", do_cancel)
+        dlg.bind("<Escape>", lambda e: do_cancel())
+        dlg.bind("<Return>", lambda e: do_confirm())
+
+        self.btn(btn_row, cancel_text, do_cancel, size=15, height=40, width=130, radius=8).pack(side="right", padx=(8, 0))
+        btn_confirm = self.btn(btn_row, confirm_text, do_confirm, size=15, height=40, width=190, kind=kind, radius=8)
+        btn_confirm.pack(side="right")
+        btn_confirm.focus_set()
+
     def action_bookmark_clear_all(self):
         lst = self._get_current_file_bookmarks()
         if not lst:
             self.flash_status("しおりはありません", COLOR_TEXT_SUB, 1500)
             return
-        if messagebox.askyesno("しおり消去", "この音声ファイルのすべてのしおりを消去しますか？"):
+
+        count = len(lst)
+        def on_confirmed():
             self.config["bookmarks_dict"][self.engine.current_file] = []
             self.refresh_bookmarks_ui()
             self.save_config()
-            self.flash_status("すべてのしおりを消去しました", COLOR_TEXT_SUB, 2000)
+            self.flash_status(f"すべてのしおり（{count}箇所）を消去しました", COLOR_TEXT_SUB, 2000)
+
+        self.show_custom_confirm_dialog(
+            title="Dicta — しおり全消去",
+            icon="🗑️",
+            heading="しおりの一括消去",
+            message=f"現在開いている音声ファイルに記録されている、すべてのしおり（合計 {count} 箇所）を完全に消去します。\n\nこの操作は元に戻せません。本当によろしいですか？",
+            confirm_text="🗑️ すべて消去する",
+            cancel_text="キャンセル",
+            kind="danger",
+            on_confirm=on_confirmed
+        )
+
+    def show_boost_warning_dialog(self, target_vol=1.05):
+        def on_allow_boost():
+            self.boost_warning_dismissed = True
+            self.set_volume_ui(target_vol, check_boost=False)
+            self.flash_status("⚠️ 音量ブースト（限界突破）を有効化しました", "#FF8C00", 2500)
+
+        def on_cancel():
+            self.set_volume_ui(1.0, check_boost=False)
+
+        self.show_custom_confirm_dialog(
+            title="Dicta — 音量ブースト（限界突破）警告",
+            icon="⚠️",
+            heading="音量ブースト（限界突破）の注意",
+            message="100%を超える音量ブースト（最大200%）は、極小音量の録音や聞き取りにくい声の増幅に有効ですが、音割れ（クリッピング）や突発的な大音量により、耳やスピーカー・イヤホンに負担をかける恐れがあります。\n\n限界突破ラインを超えて音量を引き上げますか？",
+            confirm_text="💥 了解してブーストを許可",
+            cancel_text="100%に留める",
+            kind="warning",
+            on_confirm=on_allow_boost,
+            on_cancel=on_cancel
+        )
 
     def update_seek_markers(self):
         bms = self._get_current_file_bookmarks()
@@ -1834,20 +1934,47 @@ class DictaApp(ctk.CTk):
     def adjust_pitch(self, delta):
         self.set_pitch(self.config.get("pitch", 0.0) + delta)
 
-    def set_volume_ui(self, vol):
-        vol = max(0.0, min(1.0, float(vol)))
+    def set_volume_ui(self, vol, check_boost=True):
+        vol = round(max(0.0, min(2.0, float(vol))), 3)
+        if vol > 1.0 and not getattr(self, "boost_warning_dismissed", False) and check_boost:
+            self.slider_vol.set(100.0)
+            self.on_volume_change(1.0)
+            self.show_boost_warning_dialog(target_vol=vol)
+            return
         self.slider_vol.set(vol * 100.0)
         self.on_volume_change(vol)
 
     def adjust_volume(self, delta):
-        self.set_volume_ui(round(self.config.get("volume", 0.9) + delta, 3))
+        cur = self.config.get("volume", 0.9)
+        new_vol = round(cur + delta, 3)
+        self.set_volume_ui(new_vol, check_boost=True)
+
+    def on_slider_vol_command(self, vol):
+        vol = round(max(0.0, min(2.0, float(vol))), 3)
+        if vol > 1.0 and not getattr(self, "boost_warning_dismissed", False):
+            self.slider_vol.set(100.0)
+            self.on_volume_change(1.0)
+            self.show_boost_warning_dialog(target_vol=vol)
+            return
+        self.on_volume_change(vol)
 
     def on_volume_change(self, vol):
-        vol = max(0.0, min(1.0, float(vol)))
+        vol = max(0.0, min(2.0, float(vol)))
         self.engine.set_volume(vol)
         self.config["volume"] = vol
         pct = vol * 100.0
-        self.lbl_vol_val.configure(text=f"{pct:.0f}%" if abs(pct - round(pct)) < 0.05 else f"{pct:.1f}%")
+
+        if vol <= 1.0:
+            self.lbl_vol_val.configure(text=f"{pct:.0f}%", text_color=COLOR_NEON_CYAN)
+            self.slider_vol.configure(progress_color=COLOR_NEON_CYAN, button_color="#FFFFFF", button_hover_color=COLOR_NEON_CYAN)
+            if hasattr(self, "lbl_vol_badge"):
+                self.lbl_vol_badge.configure(text="（マウスホイールで1%微調整）", text_color=COLOR_TEXT_SUB)
+        else:
+            boost_color = "#FF3344" if vol >= 1.5 else "#FF8C00"
+            self.lbl_vol_val.configure(text=f"{pct:.0f}% 💥 BOOST", text_color=boost_color)
+            self.slider_vol.configure(progress_color=boost_color, button_color=boost_color, button_hover_color="#FFA033")
+            if hasattr(self, "lbl_vol_badge"):
+                self.lbl_vol_badge.configure(text="⚠️ 音量ブースト中（大音量・音割れ注意）", text_color=boost_color)
 
     def on_eq_preset_changed(self, choice):
         if choice in EQ_PRESETS:

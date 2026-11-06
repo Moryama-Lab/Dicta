@@ -468,7 +468,8 @@ class BassAudioEngine:
     def set_volume(self, volume):
         with self._lock:
             # Remember the requested volume so it is re-applied when a file is (re)loaded
-            self.volume = max(0.0, min(1.0, float(volume)))
+            # Range: 0.0 to 2.0 (1.0 = 100% normal max, >1.0 = digital boost / amplification up to 200%)
+            self.volume = max(0.0, min(2.0, float(volume)))
             if not self.tempo_stream:
                 return False
             return bool(self.bass.BASS_ChannelSetAttribute(self.tempo_stream, BASS_ATTRIB_VOL, ctypes.c_float(self.volume)))

@@ -37,8 +37,8 @@ def register_open_with():
     else:
         cmd = f'"{pythonw_exe}" "{dicta_py}" "%1"'
     
-    # アイコンは常に dicta.ico を直接指定（EXE内部の古いキャッシュ問題を100%回避）
-    target_icon = f'"{ico_path}",0' if os.path.exists(ico_path) else f'"{exe_path}",0'
+    # アイコンは常に dicta.ico を直接指定（クォートなしがWindowsレジストリ標準・古いキャッシュ問題を100%回避）
+    target_icon = f"{ico_path},0" if os.path.exists(ico_path) else f"{exe_path},0"
 
     try:
         # 1. HKEY_CURRENT_USER\Software\Classes\Applications\Dicta.exe

@@ -49,11 +49,12 @@ ScalingTracker.check_dpi_scaling = lambda *args, **kwargs: None
 from bass_engine import BassAudioEngine
 from hotkey_manager import HotkeyManager, parse_hotkey_string, VK_TO_NAME, VK_KEYS
 try:
-    from register_open_with import register_open_with, unregister_open_with, is_registered
+    from register_open_with import register_open_with, unregister_open_with, is_registered, create_desktop_shortcut
 except Exception:
     register_open_with = None
     unregister_open_with = None
     is_registered = lambda: False
+    create_desktop_shortcut = None
 
 user32 = ctypes.windll.user32
 
@@ -2365,6 +2366,31 @@ class DictaApp(ctk.CTk):
         refresh_reg_status()
         self.btn(reg_row, "登録を解除する", do_unregister, size=14, height=36, width=130, kind="danger").pack(side="right", padx=(6, 0))
         self.btn(reg_row, "「プログラムから開く」に登録する", do_register, size=14, height=36, width=240, kind="primary").pack(side="right")
+
+        # --- デスクトップショートカット作成カード ---
+        sep2 = ctk.CTkFrame(pg, fg_color="#1E293B", height=2)
+        sep2.pack(fill="x", pady=(14, 10))
+
+        sc_card = ctk.CTkFrame(pg, fg_color="#0A1426", corner_radius=12, border_width=1, border_color="#1E3A5F")
+        sc_card.pack(fill="x", pady=4, padx=2)
+
+        ctk.CTkLabel(sc_card, text="🖥  デスクトップ ショートカット作成", font=self.F(17), text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=14, pady=(10, 4))
+        ctk.CTkLabel(
+            sc_card,
+            text="デスクトップに Dicta のアイコン付きショートカット（Dicta.lnk）を作成します。\n次回からデスクトップのアイコンからワンクリックですぐに起動できるようになります。",
+            font=self.F(14, bold=False), text_color=COLOR_TEXT_SUB, justify="left"
+        ).pack(anchor="w", padx=14, pady=(0, 10))
+
+        sc_row = ctk.CTkFrame(sc_card, fg_color="transparent")
+        sc_row.pack(fill="x", padx=14, pady=(0, 12))
+
+        def do_create_sc():
+            if create_desktop_shortcut and create_desktop_shortcut():
+                messagebox.showinfo("作成完了", "デスクトップに「Dicta」のショートカットを作成しました！", parent=dlg)
+            else:
+                messagebox.showerror("エラー", "ショートカットの作成に失敗しました。", parent=dlg)
+
+        self.btn(sc_row, "🖥️ デスクトップにショートカットを作成する", do_create_sc, size=14, height=36, width=280, kind="cyan").pack(side="right")
 
         # 初期表示タブをセット
         switch_tab("keys")

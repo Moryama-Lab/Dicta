@@ -42,6 +42,7 @@ dicta/
 ├── dicta.ico            # Windows用マルチ解像度アプリアイコン（太枠ネオンシアン＋発光グロー）
 ├── dicta_logo.png       # アプリケーションヘッダー用ロゴ画像
 ├── 起動_Dicta.bat        # ワンクリック起動バッチ
+├── デスクトップにショートカットを作成.bat # デスクトップショートカット作成バッチ
 ├── bass.dll             # 64bit BASS Core Native DLL (v2.4.17)
 ├── bass_fx.dll          # 64bit BASS_FX DSP/Tempo/Pitch Native DLL (v2.4.12)
 ├── bass_aac.dll         # 64bit BASS_AAC Advanced Audio Coding Plugin (v2.4.5)
@@ -204,6 +205,6 @@ Wordやブラウザが最前面にある状態でもバックグラウンドで�
 
 ---
 
-## 8. 開発・クレジット・謝辞
-- **Author & Developer**: **Moryama-Lab** & **Google Antigravity (Gemini 4 Argon)**
-- **Concept & Heritage**: Dedicated to the classic workflow popularized by "Okoshiyasu2" by Hiroshi Hayasaka (完全新規設計・独自実装によるリスペクト作品)
+## 8. 開発・クレジット
+- **Author & Developer**: **Moryama-Lab** & **Google Antigravity (Version 2.29.0)**
+- **Heritage**: 長年親しまれてきた文字起こしソフト「Okoshiyasu2」を参考にゼロから再構築された完全オリジナル実装

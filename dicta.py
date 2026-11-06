@@ -579,6 +579,161 @@ class MainSeekBar(tk.Canvas):
 
 
 # =============================================================================
+class BoostVolumeSlider(tk.Canvas):
+    """
+    通常領域（0〜100%：シアン）とブースト領域（100〜200%：最初からオレンジ）が
+    視覚的に一目で分かる専用高品位音量スライダー。
+    """
+    def __init__(self, master, scale, bg, on_change, on_request_boost, height=42):
+        self.s = scale
+        self.h = int(height * scale)
+        super().__init__(master, height=self.h, bg=bg, highlightthickness=0, bd=0, cursor="hand2")
+        self.on_change = on_change
+        self.on_request_boost = on_request_boost
+
+        self.volume = 0.9  # 0.0 〜 2.0
+        self.boost_allowed = False
+        self.dragging = False
+
+        self.pad_x = int(14 * scale)
+        self.track_y = int(self.h * 0.40)
+        self.track_th = max(7, int(9 * scale))
+        self.r = max(8, int(10 * scale))
+
+        # Pillow 4xスーパーサンプリング丸ツマミ画像
+        self.img_knob_norm = make_smooth_circle_image(self.r, max(2, int(2.5 * scale)), "#FFFFFF", COLOR_NEON_CYAN)
+        self.img_knob_boost = make_smooth_circle_image(self.r, max(2, int(2.5 * scale)), "#FFFFFF", "#FF8C00")
+
+        # 1. 通常ゾーン背景 (0〜100%)
+        self.it_track_norm_bg = self.create_line(0, 0, 0, 0, fill="#132742", width=self.track_th, capstyle="round")
+        # 2. ブーストゾーン背景 (100〜200%) - 最初から鮮烈なオレンジ！
+        self.it_track_boost_bg = self.create_line(0, 0, 0, 0, fill="#522000", width=self.track_th, capstyle="round")
+        # 3. 通常ゾーン進捗 (シアン)
+        self.it_prog_norm = self.create_line(0, 0, 0, 0, fill=COLOR_NEON_CYAN, width=self.track_th, capstyle="round")
+        # 4. ブーストゾーン進捗 (発光オレンジ)
+        self.it_prog_boost = self.create_line(0, 0, 0, 0, fill="#FF8C00", width=self.track_th, capstyle="round")
+        # 5. 100%境界目盛り線
+        self.it_mark_100 = self.create_line(0, 0, 0, 0, fill="#FFFFFF", width=2)
+        # 6. 下部目盛りテキスト
+        self.font_scale = (FONT_UI, max(9, int(10 * scale)), "normal")
+        self.font_scale_bold = (FONT_UI, max(9, int(10 * scale)), "bold")
+        self.it_lbl_0 = self.create_text(0, 0, text="0%", fill=COLOR_TEXT_SUB, font=self.font_scale, anchor="w")
+        self.it_lbl_100 = self.create_text(0, 0, text="100% (通常最大)", fill="#FFFFFF", font=self.font_scale_bold, anchor="center")
+        self.it_lbl_200 = self.create_text(0, 0, text="200% ⚠️ BOOST", fill="#FF8C00", font=self.font_scale_bold, anchor="e")
+        # 7. ツマミ (Knob)
+        self.it_knob = self.create_image(0, 0, image=self.img_knob_norm)
+
+        self._last_w = 0
+        self.bind("<Configure>", self._on_configure)
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<B1-Motion>", self._on_drag)
+        self.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<MouseWheel>", self._on_wheel)
+
+    def _on_configure(self, e):
+        if abs(e.width - self._last_w) >= 2:
+            self._last_w = e.width
+            self._layout()
+
+    def set_volume(self, vol):
+        self.volume = max(0.0, min(2.0, float(vol)))
+        self._layout()
+
+    def set_boost_allowed(self, allowed):
+        self.boost_allowed = bool(allowed)
+
+    def _layout(self):
+        w = self.winfo_width()
+        if w < 50:
+            return
+        x0 = self.pad_x
+        x1 = w - self.pad_x
+        xm = (x0 + x1) / 2.0  # 100%の位置（中央）
+        y = self.track_y
+
+        # 背景トラック（左半分：シアン系ネイビー、右半分：最初からオレンジ！）
+        self.coords(self.it_track_norm_bg, x0, y, xm, y)
+        self.coords(self.it_track_boost_bg, xm, y, x1, y)
+
+        # 現在のツマミ位置
+        ratio = self.volume / 2.0  # 0.0 〜 1.0 (200%で1.0)
+        xk = x0 + ratio * (x1 - x0)
+
+        # 進捗の描画
+        if self.volume <= 1.0:
+            self.coords(self.it_prog_norm, x0, y, max(x0, xk), y)
+            self.itemconfigure(self.it_prog_norm, state="normal")
+            self.itemconfigure(self.it_prog_boost, state="hidden")
+            self.itemconfigure(self.it_knob, image=self.img_knob_norm)
+        else:
+            self.coords(self.it_prog_norm, x0, y, xm, y)
+            self.itemconfigure(self.it_prog_norm, state="normal")
+            self.coords(self.it_prog_boost, xm, y, max(xm, xk), y)
+            self.itemconfigure(self.it_prog_boost, state="normal")
+            self.itemconfigure(self.it_knob, image=self.img_knob_boost)
+
+        # 境界線
+        mark_h = int(self.track_th * 1.6)
+        self.coords(self.it_mark_100, xm, y - mark_h // 2, xm, y + mark_h // 2)
+
+        # 下部ラベル
+        lbl_y = y + int(14 * self.s)
+        self.coords(self.it_lbl_0, x0, lbl_y)
+        self.coords(self.it_lbl_100, xm, lbl_y)
+        self.coords(self.it_lbl_200, x1, lbl_y)
+
+        # ツマミ
+        self.coords(self.it_knob, xk, y)
+
+    def _vol_from_x(self, x):
+        w = self.winfo_width()
+        x0 = self.pad_x
+        x1 = w - self.pad_x
+        if x1 <= x0:
+            return 0.0
+        ratio = max(0.0, min(1.0, (x - x0) / float(x1 - x0)))
+        return ratio * 2.0
+
+    def _on_press(self, e):
+        self.dragging = True
+        self._handle_user_input(e.x)
+
+    def _on_drag(self, e):
+        if self.dragging:
+            self._handle_user_input(e.x)
+
+    def _on_release(self, e):
+        self.dragging = False
+
+    def _handle_user_input(self, x):
+        target_vol = round(self._vol_from_x(x), 3)
+        if target_vol > 1.0 and not self.boost_allowed:
+            self.volume = 1.0
+            self._layout()
+            if self.on_request_boost:
+                self.on_request_boost(target_vol)
+            return
+        self.volume = target_vol
+        self._layout()
+        if self.on_change:
+            self.on_change(self.volume)
+
+    def _on_wheel(self, e):
+        delta = 0.02 if e.delta > 0 else -0.02
+        target_vol = round(self.volume + delta, 3)
+        if target_vol > 1.0 and not self.boost_allowed:
+            self.volume = 1.0
+            self._layout()
+            if self.on_request_boost:
+                self.on_request_boost(target_vol)
+            return
+        self.volume = max(0.0, min(2.0, target_vol))
+        self._layout()
+        if self.on_change:
+            self.on_change(self.volume)
+
+
+# =============================================================================
 # Main Application
 # =============================================================================
 class DictaApp(ctk.CTk):
@@ -636,6 +791,7 @@ class DictaApp(ctk.CTk):
         self._iso_drag_fixed_hz = 1200.0
         self._iso_drag_ratio_offset = 0.0
         self.boost_warning_dismissed = False
+        self._boost_dialog_open = False
 
         step = lambda: self.config.get("speed_step", 0.05)
         self.action_dispatch = {
@@ -1095,12 +1251,13 @@ class DictaApp(ctk.CTk):
         vr = ctk.CTkFrame(vol_frame, fg_color="transparent")
         vr.pack(fill="x", padx=8, pady=(0, 6))
         self.btn(vr, "－", lambda: self.adjust_volume(-0.01), size=18, height=36, width=44, radius=6).pack(side="left")
-        self.slider_vol = ctk.CTkSlider(
-            vr, from_=0, to=200, number_of_steps=400, height=24,
-            fg_color="#1B2E4B", progress_color=COLOR_NEON_CYAN, button_color="#FFFFFF",
-            button_hover_color=COLOR_NEON_CYAN, command=lambda v: self.on_slider_vol_command(float(v) / 100.0))
+        self.slider_vol = BoostVolumeSlider(
+            vr, self.ui_scale, "#071020",
+            on_change=self.on_volume_change,
+            on_request_boost=self.show_boost_warning_dialog,
+            height=38
+        )
         self.slider_vol.pack(side="left", fill="x", expand=True, padx=8)
-        self.slider_vol.bind("<MouseWheel>", lambda e: self.adjust_volume(0.01 if e.delta > 0 else -0.01))
         self.btn(vr, "＋", lambda: self.adjust_volume(0.01), size=18, height=36, width=44, radius=6).pack(side="left")
 
     def _build_mini_mode(self):
@@ -1884,12 +2041,20 @@ class DictaApp(ctk.CTk):
         )
 
     def show_boost_warning_dialog(self, target_vol=1.05):
+        if getattr(self, "_boost_dialog_open", False):
+            return  # 既にダイアログが開いている場合は多重起動を絶対に防止
+        self._boost_dialog_open = True
+
         def on_allow_boost():
+            self._boost_dialog_open = False
             self.boost_warning_dismissed = True
+            if hasattr(self, "slider_vol"):
+                self.slider_vol.set_boost_allowed(True)
             self.set_volume_ui(target_vol, check_boost=False)
             self.flash_status("⚠️ 音量ブースト（限界突破）を有効化しました", "#FF8C00", 2500)
 
         def on_cancel():
+            self._boost_dialog_open = False
             self.set_volume_ui(1.0, check_boost=False)
 
         self.show_custom_confirm_dialog(
@@ -1937,26 +2102,23 @@ class DictaApp(ctk.CTk):
     def set_volume_ui(self, vol, check_boost=True):
         vol = round(max(0.0, min(2.0, float(vol))), 3)
         if vol > 1.0 and not getattr(self, "boost_warning_dismissed", False) and check_boost:
-            self.slider_vol.set(100.0)
+            if hasattr(self, "slider_vol"):
+                self.slider_vol.set_volume(1.0)
             self.on_volume_change(1.0)
             self.show_boost_warning_dialog(target_vol=vol)
             return
-        self.slider_vol.set(vol * 100.0)
+        if hasattr(self, "slider_vol"):
+            if getattr(self, "boost_warning_dismissed", False):
+                self.slider_vol.set_boost_allowed(True)
+            self.slider_vol.set_volume(vol)
         self.on_volume_change(vol)
 
     def adjust_volume(self, delta):
+        if getattr(self, "_boost_dialog_open", False):
+            return  # 警告画面表示中はホイールやボタンによる多重発火を完全ガード
         cur = self.config.get("volume", 0.9)
         new_vol = round(cur + delta, 3)
         self.set_volume_ui(new_vol, check_boost=True)
-
-    def on_slider_vol_command(self, vol):
-        vol = round(max(0.0, min(2.0, float(vol))), 3)
-        if vol > 1.0 and not getattr(self, "boost_warning_dismissed", False):
-            self.slider_vol.set(100.0)
-            self.on_volume_change(1.0)
-            self.show_boost_warning_dialog(target_vol=vol)
-            return
-        self.on_volume_change(vol)
 
     def on_volume_change(self, vol):
         vol = max(0.0, min(2.0, float(vol)))
@@ -1966,13 +2128,11 @@ class DictaApp(ctk.CTk):
 
         if vol <= 1.0:
             self.lbl_vol_val.configure(text=f"{pct:.0f}%", text_color=COLOR_NEON_CYAN)
-            self.slider_vol.configure(progress_color=COLOR_NEON_CYAN, button_color="#FFFFFF", button_hover_color=COLOR_NEON_CYAN)
             if hasattr(self, "lbl_vol_badge"):
                 self.lbl_vol_badge.configure(text="（マウスホイールで1%微調整）", text_color=COLOR_TEXT_SUB)
         else:
             boost_color = "#FF3344" if vol >= 1.5 else "#FF8C00"
             self.lbl_vol_val.configure(text=f"{pct:.0f}% 💥 BOOST", text_color=boost_color)
-            self.slider_vol.configure(progress_color=boost_color, button_color=boost_color, button_hover_color="#FFA033")
             if hasattr(self, "lbl_vol_badge"):
                 self.lbl_vol_badge.configure(text="⚠️ 音量ブースト中（大音量・音割れ注意）", text_color=boost_color)
 

@@ -75,7 +75,7 @@ except Exception:
 
 # Ensure Windows 11 Taskbar displays Dicta's own icon instead of generic Python icon
 try:
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("MoriyamaLab.Dicta.TranscriptionEngine.3.2")
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Dicta.AudioStudio.TranscriptionEngine.3.2")
 except Exception:
     pass
 

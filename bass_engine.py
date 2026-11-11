@@ -87,7 +87,7 @@ class BassAudioEngine:
         self.bass = ctypes.WinDLL(bass_dll_path)
         self.bass_fx = ctypes.WinDLL(bass_fx_dll_path)
 
-        # Configure ctypes signatures
+        # Configure ctypes signatures (Unicode wchar_t* for Japanese & multilingual paths)
         self.bass.BASS_SetConfig.argtypes = [ctypes.c_ulong, ctypes.c_ulong]
         self.bass.BASS_SetConfig.restype = wintypes.BOOL
 
@@ -96,10 +96,10 @@ class BassAudioEngine:
         self.bass.BASS_Free.restype = wintypes.BOOL
         self.bass.BASS_ErrorGetCode.restype = ctypes.c_int
 
-        self.bass.BASS_PluginLoad.argtypes = [ctypes.c_char_p, ctypes.c_ulong]
+        self.bass.BASS_PluginLoad.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong]
         self.bass.BASS_PluginLoad.restype = ctypes.c_ulong
 
-        self.bass.BASS_StreamCreateFile.argtypes = [wintypes.BOOL, ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_ulong]
+        self.bass.BASS_StreamCreateFile.argtypes = [wintypes.BOOL, ctypes.c_wchar_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_ulong]
         self.bass.BASS_StreamCreateFile.restype = ctypes.c_ulong
 
         self.bass.BASS_StreamFree.argtypes = [ctypes.c_ulong]
@@ -169,7 +169,15 @@ class BassAudioEngine:
         for plugin in ["bass_aac.dll", "bassflac.dll"]:
             p_path = os.path.join(base_dir, plugin)
             if os.path.exists(p_path):
-                self.bass.BASS_PluginLoad(p_path.encode("utf-8"), 0)
+                h_plug = self.bass.BASS_PluginLoad(p_path, BASS_UNICODE)
+                if not h_plug:
+                    try:
+                        self.bass.BASS_PluginLoad.argtypes = [ctypes.c_char_p, ctypes.c_ulong]
+                        self.bass.BASS_PluginLoad(p_path.encode(sys.getfilesystemencoding(), errors="replace"), 0)
+                    except Exception:
+                        pass
+                    finally:
+                        self.bass.BASS_PluginLoad.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong]
 
         self.tempo_stream = 0
         self.current_file = None
@@ -216,19 +224,20 @@ class BassAudioEngine:
 
     def _prepare_safe_local_path(self, file_path, enable_cache=True):
         self.is_cached_copy = False
+        norm_path = os.path.abspath(os.path.normpath(file_path))
         if not enable_cache:
-            return file_path
+            return norm_path
         try:
-            file_size = os.path.getsize(file_path)
+            file_size = os.path.getsize(norm_path)
             if file_size <= 350 * 1024 * 1024:
-                stat = os.stat(file_path)
-                key_src = f"{file_path}|{stat.st_size}|{int(stat.st_mtime)}"
+                stat = os.stat(norm_path)
+                key_src = f"{norm_path}|{stat.st_size}|{int(stat.st_mtime)}"
                 file_hash = hashlib.md5(key_src.encode("utf-8", errors="ignore")).hexdigest()[:12]
-                ext = os.path.splitext(file_path)[1].lower()
+                ext = os.path.splitext(norm_path)[1].lower()
                 cached_path = os.path.join(self.cache_dir, f"dicta_{file_hash}{ext}")
 
                 if not os.path.exists(cached_path) or os.path.getsize(cached_path) != file_size:
-                    shutil.copy2(file_path, cached_path)
+                    shutil.copy2(norm_path, cached_path)
                 else:
                     os.utime(cached_path, None)
 
@@ -237,7 +246,40 @@ class BassAudioEngine:
                 return cached_path
         except Exception as e:
             print("Local cache fallback to direct path:", e)
-        return file_path
+        return norm_path
+
+    def _transcode_via_ffmpeg(self, src_path):
+        """
+        BASSネイティブで開けない場合（OPUS, WMA, 特殊AAC/WebM等）、
+        ffmpegを用いて高速・ロスレスにPCM WAVへオンデマンド変換する自動救済機構。
+        """
+        try:
+            import subprocess
+            norm_path = os.path.abspath(os.path.normpath(src_path))
+            if not os.path.exists(norm_path):
+                return None
+            stat = os.stat(norm_path)
+            key_src = f"ffmpeg_tc|{norm_path}|{stat.st_size}|{int(stat.st_mtime)}"
+            file_hash = hashlib.md5(key_src.encode("utf-8", errors="ignore")).hexdigest()[:12]
+            dst_wav = os.path.join(self.cache_dir, f"dicta_tc_{file_hash}.wav")
+
+            if os.path.exists(dst_wav) and os.path.getsize(dst_wav) > 1024:
+                return dst_wav
+
+            cmd = [
+                "ffmpeg", "-y", "-v", "error",
+                "-i", norm_path,
+                "-vn", "-acodec", "pcm_s16le", "-ar", "44100",
+                dst_wav
+            ]
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, creationflags=creationflags)
+            if res.returncode == 0 and os.path.exists(dst_wav) and os.path.getsize(dst_wav) > 1024:
+                self.is_cached_copy = True
+                return dst_wav
+        except Exception as e:
+            print("ffmpeg transcode fallback error:", e)
+        return None
 
     def load_file(self, file_path, use_local_cache=True):
         with self._lock:
@@ -249,18 +291,24 @@ class BassAudioEngine:
                 self.isolator_fx1 = 0
                 self.isolator_fx2 = 0
 
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"Audio file not found: {file_path}")
+            norm_file_path = os.path.abspath(os.path.normpath(file_path))
+            if not os.path.exists(norm_file_path):
+                raise FileNotFoundError(f"Audio file not found: {norm_file_path}")
 
-            play_path = self._prepare_safe_local_path(file_path, enable_cache=use_local_cache)
+            play_path = self._prepare_safe_local_path(norm_file_path, enable_cache=use_local_cache)
             self.active_local_path = play_path
 
             flags = BASS_STREAM_DECODE | BASS_STREAM_PRESCAN | BASS_UNICODE
-            path_wchar = ctypes.c_wchar_p(play_path)
+            decode_stream = self.bass.BASS_StreamCreateFile(False, play_path, 0, 0, flags)
 
-            decode_stream = self.bass.BASS_StreamCreateFile(
-                False, ctypes.cast(path_wchar, ctypes.c_void_p), 0, 0, flags
-            )
+            # 初回オープン失敗時の自動救済（ffmpegによる高速ロスレス変換）
+            if not decode_stream:
+                transcoded = self._transcode_via_ffmpeg(norm_file_path)
+                if transcoded and os.path.exists(transcoded):
+                    play_path = transcoded
+                    self.active_local_path = play_path
+                    decode_stream = self.bass.BASS_StreamCreateFile(False, play_path, 0, 0, flags)
+
             if not decode_stream:
                 err = self.bass.BASS_ErrorGetCode()
                 raise RuntimeError(f"Failed to create decode stream. BASS error code: {err}")

@@ -68,8 +68,10 @@ def get_current_modifiers():
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
     HAS_DND = True
+    _BaseApp = (ctk.CTk, TkinterDnD.DnDWrapper)
 except Exception:
     HAS_DND = False
+    _BaseApp = (ctk.CTk,)
 
 # Ensure Windows 11 Taskbar displays Dicta's own icon instead of generic Python icon
 try:
@@ -737,7 +739,7 @@ class BoostVolumeSlider(tk.Canvas):
 # =============================================================================
 # Main Application
 # =============================================================================
-class DictaApp(ctk.CTk):
+class DictaApp(*_BaseApp):
     def __init__(self, **kwargs):
         super().__init__()
         resolve_fonts()
@@ -1100,6 +1102,9 @@ class DictaApp(ctk.CTk):
 
         # ---------- 6. Mini mode ----------
         self._build_mini_mode()
+
+        if HAS_DND:
+            self.after(300, lambda: self._register_dnd_recursive(self))
 
     def _build_analyzer_column(self, studio):
         card = self.card(studio)
@@ -1719,13 +1724,38 @@ class DictaApp(ctk.CTk):
     # -------------------------------------------------------------------------
     # File handling
     # -------------------------------------------------------------------------
+    def _register_dnd_recursive(self, widget):
+        """ウィンドウおよび全子要素へドラッグ＆ドロップ受け取りを再帰登録"""
+        if not HAS_DND:
+            return
+        try:
+            widget.drop_target_register(DND_FILES)
+            widget.dnd_bind("<<Drop>>", self.on_file_drop)
+        except Exception:
+            pass
+        try:
+            for child in widget.winfo_children():
+                self._register_dnd_recursive(child)
+        except Exception:
+            pass
+
     def on_file_drop(self, event):
-        raw = event.data
+        """ドラッグ＆ドロップされたファイルパスを堅牢にパースして開く"""
+        raw = getattr(event, "data", None)
         if not raw:
             return
-        path = raw[1:raw.index("}")] if raw.startswith("{") and "}" in raw else raw.split()[0]
-        if os.path.exists(path):
-            self.load_audio(path)
+        try:
+            # Windows TkinterDnD passes file paths formatted via Tcl list
+            files = self.tk.splitlist(raw)
+        except Exception:
+            files = [raw.strip('{}"\' ')]
+
+        for f in files:
+            clean_path = f.strip('{}"\' ').strip()
+            clean_path = os.path.abspath(os.path.normpath(clean_path))
+            if os.path.isfile(clean_path):
+                self.load_audio(clean_path)
+                break
 
     def action_close_file(self):
         if not self.engine.current_file:

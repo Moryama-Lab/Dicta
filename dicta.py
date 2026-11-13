@@ -22,6 +22,7 @@ import json
 import time
 import ctypes
 import winsound
+import threading
 import subprocess
 from datetime import datetime
 from ctypes import wintypes
@@ -773,6 +774,8 @@ class DictaApp(*_BaseApp):
                 self.TkdndVersion = TkinterDnD._require(self)
                 self.drop_target_register(DND_FILES)
                 self.dnd_bind("<<Drop>>", self.on_file_drop)
+                self.dnd_bind("<<DragEnter>>", self._on_drag_enter)
+                self.dnd_bind("<<DragLeave>>", self._on_drag_leave)
             except Exception:
                 pass
 
@@ -787,6 +790,12 @@ class DictaApp(*_BaseApp):
         self.editing_time = None
         self._last_autosave_time = time.monotonic()
         self._status_restore_job = None
+        self._is_loading = False
+        self._drag_leave_job = None
+        self._drop_overlay_active = False
+        self._loading_anim_job = None
+        self._loading_start_time = 0.0
+        self._loading_spinner_idx = 0
         self._analyzer_idle_drawn = False
         self.spec_history = deque(maxlen=42)
         self.peak_hold = [0.0] * 44
@@ -982,19 +991,19 @@ class DictaApp(*_BaseApp):
         self.btn_settings.pack(side="right", padx=4)
 
         # ---------- 2. File bar ----------
-        file_box = self.card(mc)
-        file_box.pack(fill="x", pady=4)
+        self.file_box = self.card(mc)
+        self.file_box.pack(fill="x", pady=4)
         self.lbl_filename = ctk.CTkLabel(
-            file_box, text="音声ファイル未選択 — 右のボタン、またはドラッグ＆ドロップで開きます",
+            self.file_box, text="音声ファイル未選択 — 右のボタン、またはドラッグ＆ドロップで開きます",
             anchor="w", font=self.F(19), text_color=COLOR_TEXT_MAIN)
         self.lbl_filename.pack(side="left", fill="x", expand=True, padx=16, pady=8)
         self.btn_close_file = self.btn(
-            file_box, "解除する", self.action_close_file, size=17, height=44, width=180,
+            self.file_box, "解除する", self.action_close_file, size=17, height=44, width=180,
             kind="normal"
         )
         self.btn_close_file.pack(side="right", padx=(4, 12), pady=6)
         self.btn_open_file = self.btn(
-            file_box, "ファイルを開く", self.open_file_dialog, size=17, height=44, width=180,
+            self.file_box, "ファイルを開く", self.open_file_dialog, size=17, height=44, width=180,
             kind="primary"
         )
         self.btn_open_file.pack(side="right", padx=(4, 4), pady=6)
@@ -1102,6 +1111,9 @@ class DictaApp(*_BaseApp):
 
         # ---------- 6. Mini mode ----------
         self._build_mini_mode()
+
+        # ---------- 7. Interactive D&D & Loading Overlay ----------
+        self._build_overlay_ui()
 
         if HAS_DND:
             self.after(300, lambda: self._register_dnd_recursive(self))
@@ -1722,8 +1734,178 @@ class DictaApp(*_BaseApp):
         self._analyzer_idle_drawn = not playing
 
     # -------------------------------------------------------------------------
-    # File handling
+    # Interactive D&D & Loading Overlay + File handling
     # -------------------------------------------------------------------------
+    def _build_overlay_ui(self):
+        """ドラッグ＆ドロップ受付および読み込み中アニメーション用の最前面オーバーレイを構築"""
+        self._overlay_card = ctk.CTkFrame(
+            self,
+            fg_color="#071529",
+            corner_radius=18,
+            border_width=3,
+            border_color=COLOR_NEON_CYAN,
+        )
+        inner = ctk.CTkFrame(self._overlay_card, fg_color="transparent")
+        inner.pack(padx=38, pady=28)
+
+        self._overlay_icon = ctk.CTkLabel(
+            inner, text="📂", font=self.F(40), text_color=COLOR_NEON_CYAN
+        )
+        self._overlay_icon.pack(pady=(0, 6))
+
+        self._overlay_title = ctk.CTkLabel(
+            inner,
+            text="ここにドロップして音声ファイルを読み込み",
+            font=self.F(22),
+            text_color=COLOR_TEXT_MAIN,
+        )
+        self._overlay_title.pack(pady=(0, 6))
+
+        self._overlay_sub = ctk.CTkLabel(
+            inner,
+            text="MP3 / WAV / M4A / FLAC / AAC / OGG 等に対応",
+            font=self.F(15),
+            text_color=COLOR_TEXT_SUB,
+        )
+        self._overlay_sub.pack(pady=(0, 10))
+
+        self._overlay_progress = ctk.CTkProgressBar(
+            inner,
+            width=360,
+            height=12,
+            corner_radius=6,
+            mode="indeterminate",
+            indeterminate_speed=1.3,
+            fg_color="#112947",
+            progress_color=COLOR_NEON_CYAN,
+        )
+        # 初期状態は非表示（読み込み中のみ表示）
+
+    def _show_drop_overlay(self):
+        if self._is_loading or self._drop_overlay_active:
+            return
+        self._drop_overlay_active = True
+        try:
+            self.file_box.configure(border_color=COLOR_NEON_CYAN, border_width=2, fg_color="#0E223D")
+            self.lbl_filename.configure(text_color=COLOR_NEON_CYAN)
+        except Exception:
+            pass
+        try:
+            self._overlay_progress.stop()
+            self._overlay_progress.pack_forget()
+        except Exception:
+            pass
+        self._overlay_card.configure(border_color=COLOR_NEON_CYAN, fg_color="#071A33")
+        self._overlay_icon.configure(text="📂", text_color=COLOR_NEON_CYAN)
+        self._overlay_title.configure(text="ここにドロップして音声ファイルを読み込み", text_color=COLOR_TEXT_MAIN)
+        self._overlay_sub.configure(text="離すとすぐに読み込みを開始します（MP3 / WAV / M4A / FLAC 等）", text_color=COLOR_TEXT_SUB)
+        self._overlay_card.place(relx=0.5, rely=0.5, anchor="center")
+        self._overlay_card.lift()
+
+    def _hide_drop_overlay(self):
+        if not self._drop_overlay_active:
+            return
+        self._drop_overlay_active = False
+        try:
+            self.file_box.configure(border_color=COLOR_BORDER_SUBTLE, border_width=1, fg_color=COLOR_BG_CARD)
+            self.lbl_filename.configure(text_color=COLOR_TEXT_MAIN)
+        except Exception:
+            pass
+        if not self._is_loading:
+            self._overlay_card.place_forget()
+
+    def _show_loading_overlay(self, filename):
+        self._drop_overlay_active = False
+        self._is_loading = True
+        self._loading_start_time = time.monotonic()
+        self._loading_spinner_idx = 0
+        try:
+            self.file_box.configure(border_color=COLOR_PAUSE_ACTIVE, border_width=2, fg_color="#141F36")
+            self.lbl_filename.configure(text=f"⏳ 読み込み中: {filename}", text_color=COLOR_PAUSE_ACTIVE)
+            self.btn_open_file.configure(state="disabled")
+            self.btn_close_file.configure(state="disabled")
+        except Exception:
+            pass
+        self.set_status("● 音声ファイルを読み込み中...", COLOR_PAUSE_ACTIVE)
+
+        self._overlay_card.configure(border_color=COLOR_BORDER_GLOW, fg_color="#071529")
+        self._overlay_icon.configure(text="⠋", text_color=COLOR_NEON_CYAN)
+        self._overlay_title.configure(text=f"読み込み中: {filename}", text_color=COLOR_TEXT_MAIN)
+        self._overlay_sub.configure(text="キャッシュ準備・波形インデックスを解析しています... (0.0秒)", text_color=COLOR_TEXT_SUB)
+        self._overlay_progress.pack(pady=(4, 2))
+        self._overlay_progress.start()
+        self._overlay_card.place(relx=0.5, rely=0.5, anchor="center")
+        self._overlay_card.lift()
+        self._tick_loading_anim()
+
+    def _tick_loading_anim(self):
+        if not self._is_loading:
+            return
+        spinners = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+        ch = spinners[self._loading_spinner_idx % len(spinners)]
+        self._loading_spinner_idx += 1
+        elapsed = time.monotonic() - self._loading_start_time
+        try:
+            self._overlay_icon.configure(text=ch)
+            self._overlay_sub.configure(
+                text=f"キャッシュ準備・波形インデックスを解析しています... ({elapsed:.1f}秒)"
+            )
+        except Exception:
+            pass
+        self._loading_anim_job = self.after(100, self._tick_loading_anim)
+
+    def _hide_loading_overlay(self):
+        self._is_loading = False
+        if self._loading_anim_job is not None:
+            try:
+                self.after_cancel(self._loading_anim_job)
+            except Exception:
+                pass
+            self._loading_anim_job = None
+        try:
+            self._overlay_progress.stop()
+            self._overlay_progress.pack_forget()
+            self._overlay_card.place_forget()
+        except Exception:
+            pass
+        try:
+            self.file_box.configure(border_color=COLOR_BORDER_SUBTLE, border_width=1, fg_color=COLOR_BG_CARD)
+            self.lbl_filename.configure(text_color=COLOR_TEXT_MAIN)
+            self.btn_open_file.configure(state="normal")
+            self.btn_close_file.configure(state="normal")
+        except Exception:
+            pass
+
+    def _on_drag_enter(self, event=None):
+        if self._drag_leave_job is not None:
+            try:
+                self.after_cancel(self._drag_leave_job)
+            except Exception:
+                pass
+            self._drag_leave_job = None
+        if not self._is_loading:
+            self._show_drop_overlay()
+
+    def _on_drag_leave(self, event=None):
+        if self._drag_leave_job is not None:
+            try:
+                self.after_cancel(self._drag_leave_job)
+            except Exception:
+                pass
+        self._drag_leave_job = self.after(80, self._check_drag_leave)
+
+    def _check_drag_leave(self):
+        self._drag_leave_job = None
+        try:
+            px, py = self.winfo_pointerx(), self.winfo_pointery()
+            rx, ry = self.winfo_rootx(), self.winfo_rooty()
+            rw, rh = self.winfo_width(), self.winfo_height()
+            if rx <= px <= rx + rw and ry <= py <= ry + rh:
+                return
+        except Exception:
+            pass
+        self._hide_drop_overlay()
+
     def _register_dnd_recursive(self, widget):
         """ウィンドウおよび全子要素へドラッグ＆ドロップ受け取りを再帰登録"""
         if not HAS_DND:
@@ -1731,6 +1913,8 @@ class DictaApp(*_BaseApp):
         try:
             widget.drop_target_register(DND_FILES)
             widget.dnd_bind("<<Drop>>", self.on_file_drop)
+            widget.dnd_bind("<<DragEnter>>", self._on_drag_enter)
+            widget.dnd_bind("<<DragLeave>>", self._on_drag_leave)
         except Exception:
             pass
         try:
@@ -1741,6 +1925,18 @@ class DictaApp(*_BaseApp):
 
     def on_file_drop(self, event):
         """ドラッグ＆ドロップされたファイルパスを堅牢にパースして開く"""
+        if self._drag_leave_job is not None:
+            try:
+                self.after_cancel(self._drag_leave_job)
+            except Exception:
+                pass
+            self._drag_leave_job = None
+        self._hide_drop_overlay()
+
+        if self._is_loading:
+            self.flash_status("現在読み込み中です。完了までお待ちください…", COLOR_PAUSE_ACTIVE, 1800)
+            return
+
         raw = getattr(event, "data", None)
         if not raw:
             return
@@ -1755,7 +1951,9 @@ class DictaApp(*_BaseApp):
             clean_path = os.path.abspath(os.path.normpath(clean_path))
             if os.path.isfile(clean_path):
                 self.load_audio(clean_path)
-                break
+                return
+
+        self.flash_status("⚠ ドロップされた項目は有効な音声ファイルではありません", COLOR_PAUSE_ACTIVE, 2500)
 
     def action_close_file(self):
         if not self.engine.current_file:
@@ -1791,6 +1989,9 @@ class DictaApp(*_BaseApp):
         self.flash_status("音声ファイルを閉じました（選択解除）", COLOR_TEXT_SUB, 2000)
 
     def open_file_dialog(self):
+        if self._is_loading:
+            self.flash_status("現在読み込み中です。完了までお待ちください…", COLOR_PAUSE_ACTIVE, 1800)
+            return
         filetypes = [
             ("音声ファイル（すべて）", "*.mp3 *.wav *.m4a *.aac *.flac *.wma *.ogg"),
             ("MP3", "*.mp3"), ("WAV", "*.wav"), ("M4A/AAC", "*.m4a *.aac"), ("FLAC", "*.flac"),
@@ -1800,11 +2001,31 @@ class DictaApp(*_BaseApp):
         if path:
             self.load_audio(path)
 
-    def load_audio(self, path):
+    def load_audio(self, path, on_loaded=None):
+        if self._is_loading:
+            return
         try:
             if self.engine.current_file:
                 self.save_config()
-            dur = self.engine.load_file(path, use_local_cache=self.config.get("use_ssd_cache", True))
+        except Exception:
+            pass
+
+        filename = os.path.basename(path)
+        self._show_loading_overlay(filename)
+        use_cache = self.config.get("use_ssd_cache", True)
+
+        def _worker():
+            try:
+                dur = self.engine.load_file(path, use_local_cache=use_cache)
+                self.after(0, lambda: self._on_audio_loaded(path, dur, on_loaded))
+            except Exception as err:
+                self.after(0, lambda e=err: self._on_audio_load_error(path, e))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_audio_loaded(self, path, dur, on_loaded=None):
+        self._hide_loading_overlay()
+        try:
             self.lbl_filename.configure(text=f"♪ {os.path.basename(path)}")
             self.lbl_duration.configure(text=f"/ {format_time(dur, include_ms=False)}")
             self.seekbar.set_duration(dur)
@@ -1825,16 +2046,37 @@ class DictaApp(*_BaseApp):
             self.engine.set_volume(self.config.get("volume", 0.9))
             self.refresh_position_display(0.0)
             self.set_play_buttons(False)
+            self.flash_status(f"✔ 読み込み完了: {os.path.basename(path)}", COLOR_PLAY_ACTIVE, 2500)
+            if on_loaded:
+                on_loaded()
         except Exception as e:
-            messagebox.showerror("読み込みエラー", f"音声ファイルを開けませんでした:\n{e}")
+            messagebox.showerror("読み込みエラー", f"音声ファイルの反映に失敗しました:\n{e}")
+
+    def _on_audio_load_error(self, path, err):
+        self._hide_loading_overlay()
+        if self.engine.current_file:
+            self.lbl_filename.configure(text=f"♪ {os.path.basename(self.engine.current_file)}")
+            self.set_status(f"● 準備完了{self._cache_badge()}", COLOR_NEON_CYAN)
+        else:
+            self.lbl_filename.configure(text="音声ファイル未選択 — 右のボタン、またはドラッグ＆ドロップで開きます")
+            self.set_status("● 待機中", COLOR_TEXT_SUB)
+        messagebox.showerror("読み込みエラー", f"音声ファイルを開けませんでした:\n{err}")
 
     def resume_file(self, file_path, position):
+        def _after_resume():
+            try:
+                if position > 0:
+                    self.engine.set_position_seconds(position)
+                    self.refresh_position_display(position)
+                    self.set_status(
+                        f"● 前回の続き（{format_time(position, include_ms=False)}）から再開できます{self._cache_badge()}",
+                        COLOR_NEON_CYAN,
+                    )
+            except Exception as e:
+                print("Resume seek failed:", e)
+
         try:
-            self.load_audio(file_path)
-            if position > 0:
-                self.engine.set_position_seconds(position)
-                self.refresh_position_display(position)
-                self.set_status(f"● 前回の続き（{format_time(position, include_ms=False)}）から再開できます{self._cache_badge()}", COLOR_NEON_CYAN)
+            self.load_audio(file_path, on_loaded=_after_resume)
         except Exception as e:
             print("Resume failed:", e)
 
